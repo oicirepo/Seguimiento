@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-24-1";
+import { crearApi } from "./api.js?v=2026-11-24-2";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -1676,7 +1676,7 @@ function reglasExcel(XLSX, bytes, { etapa, finPrevisto, situacion, desde, hasta,
   poner("xl/styles.xml", est);
   // hoja: las reglas van después de sheetData/autoFilter/mergeCells y antes de hyperlinks, márgenes, etc.
   let hoja = leer("xl/worksheets/sheet1.xml");
-  const m = hoja.match(/<(dataValidations|hyperlinks|printOptions|pageMargins|pageSetup|headerFooter|drawing|legacyDrawing|tableParts|extLst)\b|<\/worksheet>/);
+  const m = hoja.match(/<(dataValidations|hyperlinks|printOptions|pageMargins|pageSetup|headerFooter|rowBreaks|colBreaks|customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)\b|<\/worksheet>/);
   hoja = hoja.slice(0, m.index) + reglas.join("") + hoja.slice(m.index);
   poner("xl/worksheets/sheet1.xml", hoja);
   return CFB.write(zip, { fileType: "zip", type: "array" });
