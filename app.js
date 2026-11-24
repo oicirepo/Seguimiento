@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-23-25";
+import { crearApi } from "./api.js?v=2026-11-24-1";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -113,6 +113,9 @@ const hoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.
 const hoyLocal = hoy;
 // Fin previsto ya pasado y la obra sin terminar
 const atrasada = (o) => !!o.fin_previsto && o.estado !== "FIN" && String(o.fin_previsto).slice(0, 10) < hoyLocal();
+// Días que faltan para el fin previsto (negativo = días de atraso); vacío si no tiene fin previsto o ya terminó
+const diasAlFin = (o) => (!o.fin_previsto || o.estado === "FIN" ? null : -diasAtraso(o));
+const textoDias = (n) => (n == null ? "" : n === 0 ? "vence hoy" : n > 0 ? `${n} día${n === 1 ? "" : "s"}` : `${-n} día${n === -1 ? "" : "s"} de atraso`);
 const diasAtraso = (o) => Math.round((new Date(hoyLocal()) - new Date(String(o.fin_previsto).slice(0, 10))) / 864e5);
 const fecha = (iso) => (iso ? new Date(iso + "T12:00:00").toLocaleDateString("es-UY", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—");
 const normal = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -1045,8 +1048,8 @@ function armadoInforme(id) {
     fila: (o) => [o.codigo, o.descripcion, Number(o.lat).toFixed(6), Number(o.lon).toFixed(6), o.z == null || o.z === "" ? "—" : numero(o.z, 2)],
     anchos: { 1: { cellWidth: 110 } } };
   if (id === "obras") return { ...porEtapa,
-    cols: ["Código", "Sala", "Localidad", "Departamento", "Licitación", "Tarea", "D.O.", "Hitos hechos"],
-    fila: (o) => [o.codigo, o.sala, o.localidad, o.departamento, o.licitacion, o.tarea, o.director_obra, hitosTxt(o)] };
+    cols: ["Código", "Sala", "Localidad", "Departamento", "Licitación", "Tarea", "D.O.", "Fin previsto", "Días", "Hitos hechos"],
+    fila: (o) => [o.codigo, o.sala, o.localidad, o.departamento, o.licitacion, o.tarea, o.director_obra, fecha(o.fin_previsto), textoDias(diasAlFin(o)), hitosTxt(o)] };
   if (id === "recep" || id === "term_e") return { ...(id === "term_e"
       ? { grupo: (x) => CAT[x.cat].nombre, ordenar: (a, b) => ORDEN_CAT.indexOf(a.cat) - ORDEN_CAT.indexOf(b.cat) || diasOrden(a) - diasOrden(b) || porCodigo(a, b) }
       : porVencimiento),
@@ -1058,10 +1061,10 @@ function armadoInforme(id) {
     cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin", "Recepción", "Hitos hechos"],
     fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio), fecha(o.fecha_fin), o.recepcion, hitosTxt(o)] };
   return { ...porEtapa,
-    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin previsto", "Hitos hechos", "Observaciones"],
+    cols: ["Código", "Estructura", "Licitación", "Año", "D.O.", "Inicio", "Fin previsto", "Días", "Hitos hechos", "Observaciones"],
     fila: (o) => [o.codigo, o.estructura, o.licitacion, o.anio, o.director_obra, fecha(o.fecha_inicio),
-      o.fin_previsto ? fecha(o.fin_previsto) + (atrasada(o) ? " (pasado)" : "") : "", hitosTxt(o), o.observaciones],
-    anchos: { 9: { cellWidth: 62 } } };
+      o.fin_previsto ? fecha(o.fin_previsto) : "", textoDias(diasAlFin(o)), hitosTxt(o), o.observaciones],
+    anchos: { 10: { cellWidth: 58 } } };
 }
 
 // PDF de una capa con las filas dadas (las de la Tabla: capa, filtros y búsqueda)
@@ -1121,6 +1124,11 @@ async function hacerInforme(boton, id, filas, respetar) {
         // «abrir» en azul; el enlace se agrega al dibujar la celda
         didParseCell: (d) => {
           if (d.section === "body" && enlaces[d.row.index]?.[d.column.index]) d.cell.styles.textColor = [26, 102, 190];
+          // días de atraso (y su fin previsto) en rojo
+          const col = cols[d.column.index];
+          if (d.section === "body" && (col === "Días" || col === "Fin previsto") && / de atraso$/.test(String(d.row.raw?.[cols.indexOf("Días")] ?? ""))) {
+            d.cell.styles.textColor = [192, 57, 43]; d.cell.styles.fontStyle = "bold";
+          }
         },
         didDrawCell: (d) => {
           const url = d.section === "body" ? enlaces[d.row.index]?.[d.column.index] : null;
@@ -1157,11 +1165,11 @@ async function hacerInforme(boton, id, filas, respetar) {
 const COLUMNAS_TABLA = {
   estructura: [["codigo", "Código"], ["etapa_nombre", "Etapa"], ["estado", "Situación", "estado"], ["estructura", "Estructura"],
     ["licitacion", "Licitación"], ["anio", "Año"], ["director_obra", "D.O."], ["fecha_inicio", "Inicio", "fecha"], ["fecha_fin", "Fin", "fecha"],
-    ["fin_previsto", "Fin previsto", "fecha"], ["recepcion", "Recepción"], ["vence_recepcion", "Vence recepción", "fecha"],
+    ["fin_previsto", "Fin previsto", "fecha"], ["dias_fin", "Días", "dias"], ["recepcion", "Recepción"], ["vence_recepcion", "Vence recepción", "fecha"],
     ["dias_para_recepcion", "Días a recepción", "num"], ["hitos", "Hitos hechos"], ["planos", "Planos"], ["observaciones", "Observaciones"]],
   obra: [["codigo", "Código"], ["etapa_nombre", "Etapa"], ["estado", "Situación", "estado"], ["sala", "Sala"], ["localidad", "Localidad"],
     ["departamento", "Departamento"], ["licitacion", "Licitación"], ["tarea", "Tarea"], ["descripcion", "Tipo"], ["director_obra", "D.O."],
-    ["fecha_fin", "Fin", "fecha"], ["fin_previsto", "Fin previsto", "fecha"], ["hitos", "Hitos hechos"], ["planos", "Planos"]],
+    ["fecha_fin", "Fin", "fecha"], ["fin_previsto", "Fin previsto", "fecha"], ["dias_fin", "Días", "dias"], ["hitos", "Hitos hechos"], ["planos", "Planos"]],
   relevamiento: [["codigo", "Código"], ["descripcion", "Descripción"], ["lat", "Latitud", "num"], ["lon", "Longitud", "num"], ["z", "Z (m)", "num"]],
   amojonamiento: [["codigo", "Código"], ["descripcion", "Descripción"], ["lat", "Latitud", "num"], ["lon", "Longitud", "num"]],
   triangulo: [["codigo", "Código"], ["area", "Área (m²)", "num"], ["vertices", "Vértices", "num"]],
@@ -1179,6 +1187,7 @@ const T = { capa: "obra_e", texto: "", respetar: false, orden: "codigo", desc: f
 function valorTabla(x, k) {
   const o = x.o;
   if (k === "etapa_nombre") return x.cat ? CAT[x.cat].nombre : "";
+  if (k === "dias_fin") return diasAlFin(o) ?? "";
   if (k === "hitos") return o.hitos_total ? `${o.hitos_hechos ?? 0} de ${o.hitos_total}` : "";
   if (k === "estado") return (SITUACIONES.find((s) => s[0] === o.estado) || [, o.estado ?? ""])[1];
   if (k === "area" || k === "vertices") {
@@ -1193,6 +1202,7 @@ function mostrarTabla(x, k, tipoCol) {
   const v = valorTabla(x, k);
   if (v === "" || v == null) return "";
   if (tipoCol === "fecha") return fecha(String(v).slice(0, 10));
+  if (tipoCol === "dias") return v < 0 ? `<span class="dias-atraso">${textoDias(v)}</span>` : textoDias(v);
   if (k === "lat" || k === "lon") return Number(v).toFixed(6);
   if (k === "area") return numero(v, 0);
   if (k === "planos") return `<a href="${esc(v)}" target="_blank" rel="noopener">abrir</a>`;
@@ -1592,11 +1602,15 @@ function columnasExcel(tipo) {
     if (clase === "url") continue; // los planos no van en el Excel
     cols.push([TITULO_CORTO[etq] || etq, (x) => (clase === "fecha" ? comoFecha(x.o[k]) : clase === "anio" && x.o[k] != null && x.o[k] !== "" ? Number(x.o[k]) : x.o[k] ?? null), col, clase, k]);
   }
+  cols.push(["Días", (x) => diasAlFin(x.o)]);
   if (tipo === "estructura") cols.push(["Vence recepción", (x) => comoFecha(x.o.vence_recepcion)], ["Días a recepción", (x) => x.o.dias_para_recepcion ?? null]);
   cols.push(["Hitos hechos", (x) => (x.o.hitos_total ? `${x.o.hitos_hechos ?? 0} de ${x.o.hitos_total}` : null)]);
   // mismo orden que la Tabla: Fin previsto al lado de Fin
   const iFin = cols.findIndex((c) => c[0] === "Fin"), iPrev = cols.findIndex((c) => c[0] === "Fin previsto");
   if (iFin >= 0 && iPrev > iFin + 1) cols.splice(iFin + 1, 0, ...cols.splice(iPrev, 1));
+  // y Días justo después de Fin previsto
+  const iDias = cols.findIndex((c) => c[0] === "Días"), iP = cols.findIndex((c) => c[0] === "Fin previsto");
+  if (iDias >= 0 && iP >= 0) cols.splice(iP + 1, 0, ...cols.splice(iDias, 1));
   return cols;
 }
 
@@ -1617,6 +1631,57 @@ function letraSobre(hex) {
   return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "1E1E1E" : "FFFFFF";
 }
 
+// Formato condicional en la hoja de datos (SheetJS no lo escribe): se agrega al XML del archivo ya armado.
+// - Etapa: el fondo sigue al texto (si se escribe «Montando» se pone amarillo). También acepta el nombre del hito.
+// - Fin previsto: en rojo si ya pasó y la situación no es FIN.
+const ALIAS_ETAPA = { hormigonado: ["Hormigonado"], montaje: ["Montado"], proyecto: ["Proyecto"], terminada: ["Terminado"] };
+function reglasExcel(XLSX, bytes, { etapa, finPrevisto, situacion, desde, hasta, cats }) {
+  const CFB = XLSX.CFB;
+  const zip = CFB.read(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), { type: "buffer" });
+  const leer = (n) => new TextDecoder().decode(CFB.find(zip, "/" + n).content);
+  const poner = (n, txt) => { const e = CFB.find(zip, "/" + n); e.content = new TextEncoder().encode(txt); e.size = e.content.length; };
+  const xml = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const col = (c) => XLSX.utils.encode_col(c);
+  const dxfs = [], reglas = [];
+  let prioridad = 1;
+  if (etapa >= 0) {
+    const rango = `${col(etapa)}${desde}:${col(etapa)}${hasta}`;
+    const reglasEtapa = [];
+    const vistos = new Set();
+    for (const c of cats) {
+      for (const nombre of [CAT[c].nombre, ...(ALIAS_ETAPA[c] || [])]) {
+        if (vistos.has(nombre.toLowerCase())) continue;
+        vistos.add(nombre.toLowerCase());
+        reglasEtapa.push(`<cfRule type="cellIs" dxfId="${dxfs.length}" priority="${prioridad++}" operator="equal"><formula>"${xml(nombre.replace(/"/g, '""'))}"</formula></cfRule>`);
+      }
+      // un formato por etapa (los alias usan el mismo)
+      const fondo = "FF" + hexXL(CAT[c].color), letra = "FF" + letraSobre(CAT[c].color);
+      dxfs.push(`<dxf><font><b/><color rgb="${letra}"/></font><fill><patternFill patternType="solid"><fgColor rgb="${fondo}"/><bgColor rgb="${fondo}"/></patternFill></fill></dxf>`);
+    }
+    reglas.push(`<conditionalFormatting sqref="${rango}">${reglasEtapa.join("")}</conditionalFormatting>`);
+  }
+  if (finPrevisto >= 0) {
+    const P = `${col(finPrevisto)}${desde}`, Sx = situacion >= 0 ? `$${col(situacion)}${desde}` : null;
+    const cond = `AND(${P}&lt;&gt;"",${P}&lt;TODAY()${Sx ? `,UPPER(${Sx})&lt;&gt;"FIN"` : ""})`;
+    reglas.push(`<conditionalFormatting sqref="${col(finPrevisto)}${desde}:${col(finPrevisto)}${hasta}"><cfRule type="expression" dxfId="${dxfs.length}" priority="${prioridad++}"><formula>${cond}</formula></cfRule></conditionalFormatting>`);
+    dxfs.push(`<dxf><font><b/><color rgb="FFC0392B"/></font></dxf>`);
+  }
+  if (!reglas.length) return bytes;
+  // estilos: la lista de formatos (dxfs) va después de cellStyles
+  let est = leer("xl/styles.xml");
+  const lista = `<dxfs count="${dxfs.length}">${dxfs.join("")}</dxfs>`;
+  if (/<dxfs[^>]*\/>/.test(est)) est = est.replace(/<dxfs[^>]*\/>/, lista);
+  else if (/<dxfs[\s\S]*?<\/dxfs>/.test(est)) est = est.replace(/<dxfs[\s\S]*?<\/dxfs>/, lista);
+  else est = est.replace(/(<\/cellStyles>|<cellStyles[^>]*\/>)/, `$1${lista}`);
+  poner("xl/styles.xml", est);
+  // hoja: las reglas van después de sheetData/autoFilter/mergeCells y antes de hyperlinks, márgenes, etc.
+  let hoja = leer("xl/worksheets/sheet1.xml");
+  const m = hoja.match(/<(dataValidations|hyperlinks|printOptions|pageMargins|pageSetup|headerFooter|drawing|legacyDrawing|tableParts|extLst)\b|<\/worksheet>/);
+  hoja = hoja.slice(0, m.index) + reglas.join("") + hoja.slice(m.index);
+  poner("xl/worksheets/sheet1.xml", hoja);
+  return CFB.write(zip, { fileType: "zip", type: "array" });
+}
+
 async function exportarExcel(id, filasTabla, boton) {
   let xs = filasTabla;
   const original = boton?.textContent;
@@ -1628,6 +1693,7 @@ async function exportarExcel(id, filasTabla, boton) {
     // mismo orden que el PDF (por etapa o por vencimiento)
     xs = [...xs].sort(armadoInforme(id).ordenar);
     const C = 3; // fila de los títulos de columna (0 = título de la hoja)
+    const colP = cols.findIndex((c) => c[0] === "Fin previsto"), colS = cols.findIndex((c) => c[0] === "Situación");
     const filas = [
       [capa.nombre], [`Seguimiento de obras OICI · exportado el ${fecha(hoy())} · ${xs.length} en total`], [],
       cols.map((c) => c[0]), ...xs.map((x) => cols.map((c) => c[1](x) ?? null))];
@@ -1643,13 +1709,18 @@ async function exportarExcel(id, filasTabla, boton) {
         const cel = hoja[k];
         const st = { ...XL.celda, font: { ...XL.celda.font } };
         if (titulo === "Código") st.font.bold = true;
-        if (titulo === "Etapa" && x.cat) {
-          // el color de la etapa, como en el mapa y las referencias
-          st.fill = { fgColor: { rgb: hexXL(CAT[x.cat].color) } };
-          st.font.color = { rgb: letraSobre(CAT[x.cat].color) };
-          st.font.bold = true;
+        // Etapa y Fin previsto atrasado: el color lo ponen reglas de formato condicional (ver reglasExcel),
+        // así cambia solo si se escribe otra etapa u otra fecha en el Excel
+        if (titulo === "Etapa") st.font.bold = true;
+        if (titulo === "Días" && colP >= 0) {
+          // calculado en el Excel: se actualiza solo cada día y si se cambia el fin previsto o la situación
+          const P = ref(r, colP), Sx = colS >= 0 ? ref(r, colS) : null;
+          const n = diasAlFin(x.o);
+          hoja[k] = n == null ? { t: "s", v: "" } : { t: "n", v: n };
+          hoja[k].f = `IF(OR(${P}=""${Sx ? `,${Sx}="FIN"` : ""}),"",INT(${P})-TODAY())`;
+          hoja[k].z = '0" días";[Red]0" días de atraso";"vence hoy"';
+          st.alignment = { ...st.alignment, horizontal: "right" };
         }
-        if (titulo === "Fin previsto" && atrasada(x.o)) st.font = { ...st.font, bold: true, color: { rgb: "C0392B" } };
         if (titulo === "Días a recepción" && typeof cel.v === "number" && cel.v < 0) st.font = { ...st.font, bold: true, color: { rgb: "C0392B" } };
         if (clase === "url" && cel.v) {
           // Planos: la celda dice «abrir» y el enlace queda detrás (como en la Tabla de la web)
@@ -1657,12 +1728,12 @@ async function exportarExcel(id, filasTabla, boton) {
           hoja[k] = { t: "s", v: "abrir", l: { Target: url, Tooltip: url } };
           st.font = { ...st.font, underline: true, color: { rgb: "1A66BE" } };
         }
-        if (cel.t === "d") hoja[k].z = "dd/mm/yyyy";
+        if (cel.t === "d" && hoja[k] === cel) hoja[k].z = "dd/mm/yyyy";
         hoja[k].s = st;
       });
     });
     hoja["!ref"] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: filas.length - 1, c: cols.length - 1 } });
-    hoja["!cols"] = cols.map(([t]) => ({ wch: t === "Observaciones" ? 40 : t === "Etapa" ? 30 : t === "Código" ? 12 : Math.max(10, t.length + 2) }));
+    hoja["!cols"] = cols.map(([t]) => ({ wch: t === "Observaciones" ? 40 : t === "Etapa" ? 30 : t === "Código" ? 12 : t === "Días" ? 19 : Math.max(10, t.length + 2) }));
     hoja["!rows"] = [{ hpt: 22 }, {}, { hpt: 6 }, { hpt: 20 }];
     hoja["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: C, c: 0 }, e: { r: filas.length - 1, c: cols.length - 1 } }) };
     const editables = cols.filter((c) => c[2]).map((c) => c[0]);
@@ -1685,7 +1756,15 @@ async function exportarExcel(id, filasTabla, boton) {
     XLSX.utils.book_append_sheet(libro, hoja, capa.tipo === "obra" ? "Obras" : capa.tipo === "relevamiento" ? "Relevamiento" : "Estructuras");
     XLSX.utils.book_append_sheet(libro, leeme, "Leeme");
     const archivo = `${capa.nombre.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${hoy()}.xlsx`;
-    XLSX.writeFile(libro, archivo, { cellDates: true });
+    const bytes = XLSX.write(libro, { bookType: "xlsx", type: "array", cellDates: true });
+    const listo = reglasExcel(XLSX, bytes, {
+      etapa: cols.findIndex((c) => c[0] === "Etapa"), finPrevisto: colP, situacion: colS,
+      desde: C + 2, hasta: C + 1 + Math.max(xs.length, 1) + 300, cats: [...new Set(CAPAS.filter((c) => c.tipo === capa.tipo).flatMap((c) => c.cats))],
+    });
+    const url = URL.createObjectURL(new Blob([listo], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: archivo });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
     aviso("Excel listo: se descargó " + archivo);
   } catch (e) {
     aviso("No se pudo armar el Excel: " + e.message, true);

@@ -545,3 +545,4 @@ body.con-tabla .mapa-zona { display: none; }
   .barra .usuario > .boton-chico:not(.boton-icono) { padding-left: 9px; padding-right: 9px; }
 }
 button.atajo { font: inherit; cursor: pointer; }
+.dias-atraso { color: #FF6B5E; font-weight: 600; }

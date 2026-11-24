@@ -205,8 +205,8 @@ function crearDemo() {
   });
   const fin = (d) => ({ fecha_fin: dia(-d), vence_recepcion: dia(730 - d), dias_para_recepcion: 730 - d });
   const est = [
-    E(1, "CPD", "CONS", 2, -34.79, -55.85, { proximo_vencimiento: dia(5) }),
-    E(2, "LR2", "CONS", 3, -34.88, -56.18),
+    E(1, "CPD", "CONS", 2, -34.79, -55.85, { proximo_vencimiento: dia(5), fin_previsto: dia(-12) }),
+    E(2, "LR2", "CONS", 3, -34.88, -56.18, { fin_previsto: dia(40) }),
     E(3, "GDA", "CONS", 4, -30.95, -55.55),
     E(4, "R4E", "PROY", 1, -32.3, -57.6),
     E(5, "CIP", "PROY", 2, -32.0, -56.6),
@@ -220,7 +220,7 @@ function crearDemo() {
     { id: 1, codigo: "SALA-12", estado: "PROY", etapa: 1, sala: "Sala Norte", localidad: "Rivera", departamento: "Rivera",
       licitacion: "L-22", tarea: "Ampliación", descripcion: "COSITIO", director_obra: "G.S.", planos: null,
       lat: -30.9, lon: -55.5, hitos_hechos: 0, hitos_total: 2, proximo_vencimiento: null },
-    { id: 2, codigo: "SALA-07", estado: "CONS", etapa: 2, sala: "Sala Este", localidad: "Rocha", departamento: "Rocha",
+    { id: 2, codigo: "SALA-07", estado: "CONS", etapa: 2, fin_previsto: dia(-3), sala: "Sala Este", localidad: "Rocha", departamento: "Rocha",
       licitacion: "L-19", tarea: "Energía", descripcion: "OBRA", director_obra: "J.P.", planos: null,
       lat: -34.48, lon: -54.33, hitos_hechos: 1, hitos_total: 2, proximo_vencimiento: null },
   ];
