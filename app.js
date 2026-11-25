@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-25-3";
+import { crearApi } from "./api.js?v=2026-11-25-4";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -310,7 +310,7 @@ const buscarElemento = (tipo, id) => S.datos[DATOS_DE_CAPA[tipo] || tipo]?.find(
 // columna de la capa → campo de la web (ESTRUCTURA → estructura, FIN PREVISTO → fin_previsto…)
 function campoDe(tipo, col) {
   if (col === "ESTADO" || col === "Estado") return "estado";
-  if (col === "OI" || col === "ART") return col.toLowerCase();
+  if (col === "OI" || col === "ART" || col === "CANDADO") return col.toLowerCase();
   const c = (CAMPOS_EDITABLES[tipo] || []).find((x) => x[0] === col);
   return c ? c[1] : null;
 }
@@ -2402,7 +2402,7 @@ function enlazarFilas(cont) {
 function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: false, attributionControl: true, maxZoom: 21 }).setView([-32.6, -56.0], 7);
-  if (new URLSearchParams(location.search).has("demo")) { window.__mapa = S.mapa; window.__S = S; } // para las pruebas de la demostración
+  if (new URLSearchParams(location.search).has("demo")) { window.__mapa = S.mapa; window.__S = S; window.__candadoAuto = candadoAuto; } // para las pruebas de la demostración
   agregarBotonesPaneles();
   L.control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(S.mapa);
   agregarBotonUbicacion();
@@ -2613,7 +2613,7 @@ function pintarFicha(tipo, o, hitos, notas) {
   ficha.innerHTML = `
     <div class="ficha-cabeza">
       ${barraCerrar("Volver a la lista")}
-      <p class="codigo">${esc(o.codigo)}</p>
+      <div class="codigo-fila"><p class="codigo">${esc(o.codigo)}</p>${candadoHtml(tipo, o)}</div>
       <p class="tipo-obra">${tipo === "estructura" ? "Estructura" : "Obra"}${o.localidad ? ", " + esc(o.localidad) : ""}</p>
       <div class="escalera" aria-hidden="true">${tramos}</div>
       <p class="etapa-actual">${simbolo(tipo, o, cat)}${esc(c.nombre)} <small>${esc(detalle)}</small></p>
@@ -2621,7 +2621,8 @@ function pintarFicha(tipo, o, hitos, notas) {
     </div>
 
     <div class="ficha-bloque">
-      <div class="bloque-titulo"><h2>Hitos</h2>${ayudamemoriaHtml(o)}</div>
+      <h2>Hitos</h2>
+      ${ayudamemoriaHtml(o)}
       ${hitos == null ? `<p class="nota">Sin conexión: los hitos se ven cuando vuelva la señal.</p>`
         : hitos.length ? hitos.map((h) => hitoHtml(h) + (h.etapa === 2 && h.estado === "HECHO" ? finPrevistoHtml(o) : "")).join("")
         : `<p class="nota">Esta obra no tiene hitos cargados.</p>`}
@@ -2682,6 +2683,7 @@ function pintarFicha(tipo, o, hitos, notas) {
     } catch (e) { aviso(e.message, true); cc.disabled = false; cc.querySelector("span").textContent = "Crear carpeta"; }
   };
   enlazarAyudamemoria(ficha, tipo, o);
+  enlazarCandado(ficha, tipo, o);
   const ed = $("#editar-datos", ficha);
   if (ed) ed.onclick = () => editarDatos(tipo, o);
   const ce = $("#cambiar-estado", ficha);
@@ -2708,11 +2710,11 @@ function finPrevistoHtml(o) {
 }
 
 // Ayudamemoria OI y ART: dos tildes sueltos, no cambian etapas ni hitos (columnas OI y ART de la capa)
-const AYUDAMEMORIA = [["OI", "oi", "OI"], ["ART", "art", "ART"]];
+const AYUDAMEMORIA = [["OI", "oi", "OI solicitada"], ["ART", "art", "ART cargado"]];
 const tildado = (v) => v === true || v === "true" || v === "t" || v === 1;
 function ayudamemoriaHtml(o) {
-  return `<div class="ayudamemoria">${AYUDAMEMORIA.map(([col, k, txt]) => `<label class="ayuda${tildado(o[k]) ? " hecho" : ""}" title="Ayudamemoria: tildalo cuando esté hecho">
-    <input type="checkbox" data-ayuda="${col}" ${tildado(o[k]) ? "checked" : ""} ${editor() ? "" : "disabled"}> ${txt}</label>`).join("")}</div>`;
+  return `<div class="ayudamemoria">${AYUDAMEMORIA.map(([col, k, txt]) => `<label class="ayuda${tildado(o[k]) ? " hecho" : ""}" title="Ayudamemoria: tildalo cuando esté hecho">${txt}
+    <input type="checkbox" data-ayuda="${col}" ${tildado(o[k]) ? "checked" : ""} ${editor() ? "" : "disabled"}></label>`).join("")}</div>`;
 }
 function enlazarAyudamemoria(ficha, tipo, o) {
   ficha.querySelectorAll("[data-ayuda]").forEach((c) => (c.onchange = async () => {
@@ -2731,6 +2733,97 @@ function enlazarAyudamemoria(ficha, tipo, o) {
       aviso(/no hay campos|column/i.test(e.message) ? "Falta preparar la base para OI y ART: corré sql/parte22_ayudamemoria.sql en Neon y tocá Refresh schema cache." : e.message, true, 9000);
     } finally { c.disabled = !editor(); }
   }));
+}
+
+// ------------------------------------------------------------ color de candado (listado de llaves por zona)
+// Automático según dónde está el punto: el departamento y, en Canelones, la zona (Pando, Atlántida o el resto).
+// Si está mal, se elige otro a mano (columna CANDADO; vacía = automático).
+const CANDADOS = {
+  negro:    { nombre: "Negro",                      color: "#141414", borde: "#9a9a9a" },
+  plateado: { nombre: "Negro con punta plateada",   color: "#141414", borde: "#d9dde2", punta: true },
+  gris:     { nombre: "Gris",                       color: "#9e9e9e" },
+  rojo:     { nombre: "Rojo",                       color: "#e53935" },
+  amarillo: { nombre: "Amarillo",                   color: "#f2d024" },
+  azul:     { nombre: "Azul",                       color: "#1e63d6" },
+  marron:   { nombre: "Marrón",                     color: "#8d5b3b" },
+  lila:     { nombre: "Lila",                       color: "#c77ddb" },
+  verde:    { nombre: "Verde",                      color: "#2e9e44" },
+  blanco:   { nombre: "Blanco",                     color: "#f5f5f5" },
+};
+const CANDADO_DEPTO = {
+  ARTIGAS: "negro", PAYSANDU: "negro", SALTO: "negro", "LIMITE CONTESTADO": "negro",
+  LAVALLEJA: "gris", MALDONADO: "gris", ROCHA: "gris",
+  "SAN JOSE": "rojo", COLONIA: "marron", "RIO NEGRO": "lila", SORIANO: "lila",
+  "CERRO LARGO": "verde", RIVERA: "verde", TACUAREMBO: "verde", "TREINTA Y TRES": "verde",
+  MONTEVIDEO: "plateado", DURAZNO: "plateado", FLORES: "plateado", FLORIDA: "plateado", CANELONES: "plateado",
+};
+// Canelones se reparte en tres zonas: se toma la localidad del listado más cercana (ubicaciones aproximadas)
+const CANELONES_ZONAS = [
+  ["amarillo", -34.717, -55.958], ["amarillo", -34.754, -56.003], ["amarillo", -34.700, -55.897], ["amarillo", -34.545, -55.872],
+  ["amarillo", -34.651, -56.063], ["amarillo", -34.733, -56.036], ["amarillo", -34.552, -55.990], ["amarillo", -34.620, -56.080],
+  ["azul", -34.772, -55.759], ["azul", -34.799, -55.380], ["azul", -34.782, -55.307], ["azul", -34.756, -55.683], ["azul", -34.763, -55.590],
+  ["azul", -34.488, -55.627], ["azul", -34.495, -55.560], ["azul", -34.765, -55.720], ["azul", -34.775, -55.836], ["azul", -34.684, -55.701],
+  ["plateado", -34.523, -56.278], ["plateado", -34.727, -56.219], ["plateado", -34.665, -56.217], ["plateado", -34.453, -56.391],
+  ["plateado", -34.343, -55.763], ["plateado", -34.293, -55.957], ["plateado", -34.500, -56.040], ["plateado", -34.440, -55.960],
+  ["plateado", -34.450, -56.080], ["plateado", -34.830, -55.975], ["plateado", -34.800, -55.920], ["plateado", -34.860, -56.050],
+  ["plateado", -34.730, -56.100], ["plateado", -34.600, -56.360], ["plateado", -34.760, -56.160],
+];
+// departamentoDe(lat, lon) está más abajo (es el mismo que usa «Punto nuevo»)
+function candadoAuto(o) {
+  if (o.lat == null || o.lon == null) return null;
+  const d = departamentoDe(Number(o.lat), Number(o.lon));
+  if (!d) return null;
+  if (d !== "CANELONES") return CANDADO_DEPTO[d] || null;
+  const km = ([, la, lo]) => (la - o.lat) ** 2 + ((lo - o.lon) * Math.cos((o.lat * Math.PI) / 180)) ** 2;
+  return [...CANELONES_ZONAS].sort((a, b) => km(a) - km(b))[0][0];
+}
+const candadoDe = (o) => (CANDADOS[o.candado] ? { clave: o.candado, auto: false } : { clave: candadoAuto(o), auto: true });
+const puntoCandado = (clave, px = 12) => {
+  const c = CANDADOS[clave];
+  if (!c) return `<span class="candado-punto vacio" style="width:${px}px;height:${px}px"></span>`;
+  return `<span class="candado-punto${c.punta ? " punta" : ""}" style="width:${px}px;height:${px}px;background:${c.color};border-color:${c.borde || "rgba(255,255,255,.35)"}"></span>`;
+};
+function candadoHtml(tipo, o) {
+  const { clave, auto } = candadoDe(o);
+  const nombre = CANDADOS[clave]?.nombre || "sin datos";
+  return `<button type="button" class="candado" id="candado" ${editor() ? "" : "disabled"}
+      title="Candado: ${esc(nombre)}${auto ? " (automático, según la zona)" : " (elegido a mano)"}${editor() ? ". Tocá para cambiarlo" : ""}">
+      ${puntoCandado(clave)}<span>${esc(nombre)}${auto && clave ? "" : ""}</span></button>`;
+}
+function enlazarCandado(ficha, tipo, o) {
+  const b = $("#candado", ficha);
+  if (!b || !editor()) return;
+  b.onclick = (ev) => {
+    ev.stopPropagation();
+    document.querySelector(".candado-menu")?.remove();
+    const auto = candadoAuto(o), actual = CANDADOS[o.candado] ? o.candado : "";
+    const m = document.createElement("div");
+    m.className = "candado-menu";
+    m.innerHTML = `<p class="nota">Color de candado</p>
+      <button type="button" data-c="" aria-pressed="${!actual}">${puntoCandado(auto)} Automático${auto ? ` (${esc(CANDADOS[auto].nombre.toLowerCase())})` : ""}</button>
+      ${Object.entries(CANDADOS).map(([k, c]) => `<button type="button" data-c="${k}" aria-pressed="${actual === k}">${puntoCandado(k)} ${esc(c.nombre)}</button>`).join("")}`;
+    b.after(m);
+    const cerrar = () => { m.remove(); document.removeEventListener("click", fuera); };
+    const fuera = (e) => { if (!m.contains(e.target)) cerrar(); };
+    setTimeout(() => document.addEventListener("click", fuera), 0);
+    m.querySelectorAll("[data-c]").forEach((x) => (x.onclick = async () => {
+      const v = x.dataset.c || null;
+      cerrar();
+      try {
+        await S.api.guardarDatos(tipo, o.id, { CANDADO: v });
+        o.candado = v;
+        const base = S.datos[tipo].find((y) => y.id === o.id);
+        if (base) base.candado = v;
+        cambiarFichaGuardada(tipo, o.id, (g) => { g.o.candado = v; });
+        guardarDatos();
+        b.outerHTML = candadoHtml(tipo, o);
+        enlazarCandado(ficha, tipo, o);
+        aviso(v ? `Candado: ${CANDADOS[v].nombre}` : "Candado automático, según la zona");
+      } catch (e) {
+        aviso(/no hay campos|column/i.test(e.message) ? "Falta preparar la base para el candado: corré sql/parte23_candado.sql en Neon y tocá Refresh schema cache." : e.message, true, 9000);
+      }
+    }));
+  };
 }
 
 function hitoHtml(h) {
