@@ -568,3 +568,5 @@ button.atajo { font: inherit; cursor: pointer; }
 .candado-menu .nota { margin: 4px 8px 6px; }
 .candado-menu button { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 0; border-radius: 6px; background: none; color: var(--tinta); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
 .candado-menu button:hover, .candado-menu button[aria-pressed="true"] { background: #3a3a3a; }
+.popup-vertice .leaflet-popup-content { margin: 10px 30px 10px 12px; }
+.menu-vertice { display: grid; gap: 8px; font-size: 13px; }

@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-25-8";
+import { crearApi } from "./api.js?v=2026-11-25-10";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -4662,7 +4662,10 @@ function terminarDibujo() {
   pintar(false);
 }
 
-function clickDibujo(ev) { if (!MED.activo) agregarVertice(ev.latlng); }
+function clickDibujo(ev) {
+  if (DIB.mantenido) return; // el clic de soltar el dedo después de mantener apretado
+  if (!MED.activo) agregarVertice(ev.latlng);
+}
 // índice donde insertar un punto para que quede en el lado del polígono más cercano
 function ladoCercano(ll) {
   const p = S.mapa.latLngToContainerPoint(ll);
@@ -4709,6 +4712,52 @@ function sugerirCodigo() {
   }
 }
 
+// Mantener apretado un vértice (unos 0,6 s sin moverlo) abre el menú para eliminarlo
+let relojMantener = null;
+const cancelarMantener = () => { clearTimeout(relojMantener); relojMantener = null; };
+function mantenerApretado(mk, alMantener) {
+  const el = mk.getElement();
+  if (!el) return;
+  let x0 = 0, y0 = 0;
+  const empezar = (x, y) => {
+    if (relojMantener) return; // touchstart y pointerdown llegan los dos
+    x0 = x; y0 = y;
+    relojMantener = setTimeout(() => {
+      relojMantener = null; DIB.mantenido = true; navigator.vibrate?.(30); alMantener();
+      // al soltar (donde sea) deja de contar el clic de soltar
+      const soltar = () => setTimeout(() => (DIB.mantenido = false), 400);
+      document.addEventListener("pointerup", soltar, { once: true, capture: true });
+      document.addEventListener("touchend", soltar, { once: true, capture: true });
+    }, 600);
+  };
+  const mover = (x, y) => { if (Math.hypot(x - x0, y - y0) > 8) cancelarMantener(); };
+  el.addEventListener("pointerdown", (e) => empezar(e.clientX, e.clientY));
+  el.addEventListener("pointermove", (e) => mover(e.clientX, e.clientY));
+  el.addEventListener("touchstart", (e) => empezar(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+  el.addEventListener("touchmove", (e) => mover(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+  for (const t of ["pointerup", "pointercancel", "touchend", "touchcancel"]) el.addEventListener(t, cancelarMantener);
+  el.addEventListener("contextmenu", (e) => e.preventDefault()); // que el celular no abra su propio menú
+}
+function menuVertice(i) {
+  const p = DIB.v[i];
+  if (!p) return;
+  const div = document.createElement("div");
+  div.className = "menu-vertice";
+  div.innerHTML = `<b>Vértice ${i + 1}</b><button type="button" class="boton boton-chico boton-peligro">Eliminar punto</button>`;
+  // closeOnClick: false porque al soltar el dedo llega un clic que lo cerraría enseguida
+  const pop = L.popup({ closeButton: true, autoClose: true, closeOnClick: false, className: "popup-vertice", offset: [0, -8] })
+    .setLatLng([p.lat, p.lon]).setContent(div).openOn(S.mapa);
+  setTimeout(() => S.mapa.once("click", () => S.mapa.closePopup(pop)), 400);
+  div.querySelector("button").onclick = () => {
+    S.mapa.closePopup(pop);
+    if (DIB.editar && DIB.v.length <= 3) return aviso("Un polígono necesita al menos 3 vértices: mové este en lugar de sacarlo.", true);
+    guardarPaso();
+    DIB.v.splice(i, 1);
+    aviso(`Vértice ${i + 1} eliminado`);
+    dibujarDibujo(); actualizarMedidas();
+  };
+}
+
 function dibujarDibujo() {
   if (!DIB.grupo) return;
   DIB.grupo.clearLayers();
@@ -4720,16 +4769,15 @@ function dibujarDibujo() {
     const mk = L.marker([p.lat, p.lon], { draggable: true, keyboard: false, zIndexOffset: 3000, autoPan: true,
       title: i === 0 && DIB.v.length >= 3 ? "Primer vértice: tocalo para cerrar" : p.mojon ? `Mojón ${p.codigo || ""}` : "Punto extra",
       icon: L.divIcon({ className: cls, html: `<span>${i + 1}</span>`, iconSize: [22, 22], iconAnchor: [11, 11] }) });
+    // un toque no borra (era muy fácil equivocarse): dejándolo apretado aparece «Eliminar punto»
     mk.on("click", (ev) => {
       L.DomEvent.stopPropagation(ev);
+      if (DIB.mantenido) return;
       if (i === 0 && DIB.v.length >= 3 && !DIB.editar) return cerrarPoligono();
-      if (DIB.editar && DIB.v.length <= 3) return aviso("Un polígono necesita al menos 3 vértices: mové este en lugar de sacarlo.", true);
-      guardarPaso();
-      DIB.v.splice(i, 1);
-      aviso(`Vértice ${i + 1} quitado`);
-      dibujarDibujo(); actualizarMedidas();
     });
-    mk.on("dragstart", guardarPaso);
+    mk.on("contextmenu", (ev) => { L.DomEvent.stopPropagation(ev); L.DomEvent.preventDefault(ev.originalEvent); menuVertice(i); });
+    mk.on("add", () => mantenerApretado(mk, () => menuVertice(i)));
+    mk.on("dragstart", () => { cancelarMantener(); guardarPaso(); });
     mk.on("drag", (ev) => {
       const q = ev.target.getLatLng();
       DIB.v[i] = { lat: q.lat, lon: q.lng, mojon: null };
@@ -4785,8 +4833,8 @@ function pintarDibujo() {
   caja.innerHTML = `
     <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">${ed ? `Editar ${esc(ed.nombre)}` : "Polígono nuevo"}</h2>
       <p class="nota" style="margin:0">${ed
-        ? "Arrastrá un vértice para moverlo y tocalo para sacarlo. Para agregar uno, tocá el + en la mitad de un lado (o arrastralo), o tocá el mapa cerca del lado. Cerca de un mojón, el vértice se engancha a él. Nada se guarda hasta que aceptes."
-        : "Tocá el mapa para marcar cada vértice. Cerca de un mojón, el vértice se engancha a él (rojo); en otro lugar queda como punto extra (blanco). Arrastrá un vértice para moverlo o tocalo para sacarlo. Tocá el 1 para cerrar."}</p>
+        ? "Arrastrá un vértice para moverlo. Para eliminarlo, dejalo apretado un momento (en la computadora, clic derecho). Para agregar uno, tocá el + en la mitad de un lado (o arrastralo), o tocá el mapa cerca del lado. Cerca de un mojón, el vértice se engancha a él. Nada se guarda hasta que aceptes."
+        : "Tocá el mapa para marcar cada vértice. Cerca de un mojón, el vértice se engancha a él (rojo); en otro lugar queda como punto extra (blanco). Arrastrá un vértice para moverlo; para eliminarlo, dejalo apretado un momento (en la computadora, clic derecho). Tocá el 1 para cerrar."}</p>
       ${ed ? "" : `<div class="botones-nuevo"><button class="boton boton-chico boton-pegar" type="button" id="dib-pegar" title="Pegar polígonos copiados en QGIS, o los vértices de un padrón copiados de Excel">Pegar desde QGIS o Excel</button></div>`}</div>
     <form class="form" id="form-dibujo" novalidate>
       ${ed ? "" : `<div class="ficha-bloque">
