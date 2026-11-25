@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-25-7";
+import { crearApi } from "./api.js?v=2026-11-25-8";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -2621,7 +2621,7 @@ function pintarFicha(tipo, o, hitos, notas) {
     </div>
 
     <div class="ficha-bloque">
-      ${ayudamemoriaHtml(o)}
+      ${ayudamemoriaHtml(o, tipo)}
       <h2>Hitos</h2>
       ${hitos == null ? `<p class="nota">Sin conexión: los hitos se ven cuando vuelva la señal.</p>`
         : hitos.length ? hitos.map((h) => hitoHtml(h) + (h.etapa === 2 && h.estado === "HECHO" ? finPrevistoHtml(o) : "")).join("")
@@ -2712,8 +2712,9 @@ function finPrevistoHtml(o) {
 // Ayudamemoria OI y ART: dos tildes sueltos, no cambian etapas ni hitos (columnas OI y ART de la capa)
 const AYUDAMEMORIA = [["OI", "oi", "OI solicitada"], ["ART", "art", "ART cargado"]];
 const tildado = (v) => v === true || v === "true" || v === "t" || v === 1;
-function ayudamemoriaHtml(o) {
-  return `<div class="ayudamemoria">${AYUDAMEMORIA.map(([col, k, txt]) => `<label class="ayuda${tildado(o[k]) ? " hecho" : ""}" title="Ayudamemoria: tildalo cuando esté hecho">${txt}
+function ayudamemoriaHtml(o, tipo) {
+  // ART cargado es solo para estructuras
+  return `<div class="ayudamemoria">${AYUDAMEMORIA.filter(([col]) => !(col === "ART" && tipo === "obra")).map(([col, k, txt]) => `<label class="ayuda${tildado(o[k]) ? " hecho" : ""}" title="Ayudamemoria: tildalo cuando esté hecho">${txt}
     <input type="checkbox" data-ayuda="${col}" ${tildado(o[k]) ? "checked" : ""} ${editor() ? "" : "disabled"}></label>`).join("")}</div>`;
 }
 function enlazarAyudamemoria(ficha, tipo, o) {
@@ -2769,9 +2770,21 @@ const CANELONES_ZONAS = [
   ["blanco", -34.730, -56.100], ["blanco", -34.600, -56.360], ["blanco", -34.760, -56.160],
 ];
 // departamentoDe(lat, lon) está más abajo (es el mismo que usa «Punto nuevo»)
+// puntos justo en la frontera o la costa (Rivera, Chuy…) que caen apenas fuera del dibujo: el departamento más cercano
+function deptoMasCerca(lat, lon) {
+  let mejor = null, dmin = Infinity;
+  for (const f of S.deptosGeo?.features || []) {
+    const polis = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+    for (const pol of polis) for (const [x, y] of pol[0]) {
+      const d = (x - lon) ** 2 + (y - lat) ** 2;
+      if (d < dmin) { dmin = d; mejor = f.properties.nombre; }
+    }
+  }
+  return dmin < 0.05 ? mejor : null; // hasta unos 20 km
+}
 function candadoAuto(o) {
   if (o.lat == null || o.lon == null) return null;
-  const d = departamentoDe(Number(o.lat), Number(o.lon));
+  const d = departamentoDe(Number(o.lat), Number(o.lon)) || deptoMasCerca(Number(o.lat), Number(o.lon));
   if (!d) return null;
   if (d !== "CANELONES") return CANDADO_DEPTO[d] || null;
   const km = ([, la, lo]) => (la - o.lat) ** 2 + ((lo - o.lon) * Math.cos((o.lat * Math.PI) / 180)) ** 2;

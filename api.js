@@ -229,15 +229,15 @@ function crearDemo() {
   const obr = [
     { id: 1, codigo: "SALA-12", estado: "PROY", etapa: 1, sala: "Sala Norte", localidad: "Rivera", departamento: "Rivera",
       licitacion: "L-22", tarea: "Ampliación", descripcion: "COSITIO", director_obra: "G.S.", planos: null,
-      lat: -30.9, lon: -55.5, hitos_hechos: 0, hitos_total: 2, proximo_vencimiento: null },
+      lat: -30.9, lon: -55.5, hitos_hechos: 0, hitos_total: 3, proximo_vencimiento: null },
     { id: 2, codigo: "SALA-07", estado: "CONS", etapa: 2, fin_previsto: dia(-3), sala: "Sala Este", localidad: "Rocha", departamento: "Rocha",
       licitacion: "L-19", tarea: "Energía", descripcion: "OBRA", director_obra: "J.P.", planos: null,
-      lat: -34.48, lon: -54.33, hitos_hechos: 1, hitos_total: 2, proximo_vencimiento: null },
+      lat: -34.48, lon: -54.33, hitos_hechos: 1, hitos_total: 3, proximo_vencimiento: null },
   ];
   const plant = { estructura: ["Proyecto ejecutivo realizado y aprobado", "Implantado", "Hormigonado", "Montado",
     "Infraestructura finalizada", "Recepción provisoria", "Recepción definitiva"],
-    obra: ["Proyecto aprobado", "Infraestructura finalizada"] };
-  const etapaDe = { estructura: [2, null, 3, 4, 5, null, 6], obra: [2, 5] };
+    obra: ["Proyecto aprobado", "Implantación", "Infraestructura finalizada"] };
+  const etapaDe = { estructura: [2, null, 3, 4, 5, null, 6], obra: [2, 3, 5] };
   const relev = [
     { id: 1, codigo: "P1", descripcion: "Poste de UTE frente al predio", z: "38.42", lat: -34.8812, lon: -56.1765 },
     { id: 2, codigo: "P2", descripcion: "Esquina del cerco", z: "37.95", lat: -34.8806, lon: -56.1781 },
@@ -355,7 +355,7 @@ function crearDemo() {
       } else {
         obr.push({ id, codigo: d["CÓDIGO"], estado: d["Estado"] || "PROY", etapa: 1, sala: d["Sala"], localidad: d["Localidad"],
           departamento: d["Departamento"], licitacion: d["Licitación"], tarea: d["Tarea"], descripcion: d["Descripción"],
-          director_obra: d["D.O."], planos: d["Planos"] || null, lat, lon, hitos_hechos: 0, hitos_total: 2, proximo_vencimiento: null });
+          director_obra: d["D.O."], planos: d["Planos"] || null, lat, lon, hitos_hechos: 0, hitos_total: 3, proximo_vencimiento: null });
       }
       return id;
     },
