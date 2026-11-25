@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-25-5";
+import { crearApi } from "./api.js?v=2026-11-25-6";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -2754,18 +2754,19 @@ const CANDADO_DEPTO = {
   LAVALLEJA: "gris", MALDONADO: "gris", ROCHA: "gris",
   "SAN JOSE": "rojo", COLONIA: "marron", "RIO NEGRO": "lila", SORIANO: "lila",
   "CERRO LARGO": "verde", RIVERA: "verde", TACUAREMBO: "verde", "TREINTA Y TRES": "verde",
-  MONTEVIDEO: "negro", DURAZNO: "negro", FLORES: "negro", FLORIDA: "negro", CANELONES: "negro",
+  // del listado, de «25 de Agosto» a «Trinidad»: Montevideo, Durazno, Flores, Florida y Canelones (menos Pando y Atlántida)
+  MONTEVIDEO: "blanco", DURAZNO: "blanco", FLORES: "blanco", FLORIDA: "blanco", CANELONES: "blanco",
 };
-// Canelones se reparte en tres zonas (Pando, Atlántida y el resto): se toma la localidad del listado más cercana (ubicaciones aproximadas)
+// Canelones se reparte en tres zonas (Pando amarillo, Atlántida azul y el resto blanco): se toma la localidad del listado más cercana (ubicaciones aproximadas)
 const CANELONES_ZONAS = [
   ["amarillo", -34.717, -55.958], ["amarillo", -34.754, -56.003], ["amarillo", -34.700, -55.897], ["amarillo", -34.545, -55.872],
   ["amarillo", -34.651, -56.063], ["amarillo", -34.733, -56.036], ["amarillo", -34.552, -55.990], ["amarillo", -34.620, -56.080],
   ["azul", -34.772, -55.759], ["azul", -34.799, -55.380], ["azul", -34.782, -55.307], ["azul", -34.756, -55.683], ["azul", -34.763, -55.590],
   ["azul", -34.488, -55.627], ["azul", -34.495, -55.560], ["azul", -34.765, -55.720], ["azul", -34.775, -55.836], ["azul", -34.684, -55.701],
-  ["negro", -34.523, -56.278], ["negro", -34.727, -56.219], ["negro", -34.665, -56.217], ["negro", -34.453, -56.391],
-  ["negro", -34.343, -55.763], ["negro", -34.293, -55.957], ["negro", -34.500, -56.040], ["negro", -34.440, -55.960],
-  ["negro", -34.450, -56.080], ["negro", -34.830, -55.975], ["negro", -34.800, -55.920], ["negro", -34.860, -56.050],
-  ["negro", -34.730, -56.100], ["negro", -34.600, -56.360], ["negro", -34.760, -56.160],
+  ["blanco", -34.523, -56.278], ["blanco", -34.727, -56.219], ["blanco", -34.665, -56.217], ["blanco", -34.453, -56.391],
+  ["blanco", -34.343, -55.763], ["blanco", -34.293, -55.957], ["blanco", -34.500, -56.040], ["blanco", -34.440, -55.960],
+  ["blanco", -34.450, -56.080], ["blanco", -34.830, -55.975], ["blanco", -34.800, -55.920], ["blanco", -34.860, -56.050],
+  ["blanco", -34.730, -56.100], ["blanco", -34.600, -56.360], ["blanco", -34.760, -56.160],
 ];
 // departamentoDe(lat, lon) está más abajo (es el mismo que usa «Punto nuevo»)
 function candadoAuto(o) {
