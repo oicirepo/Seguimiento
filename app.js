@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-25-2";
+import { crearApi } from "./api.js?v=2026-11-25-3";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -138,7 +138,7 @@ const S = {
   capaOn: { ...Object.fromEntries(CAPAS.map((c) => [c.id, c.on])), relev: true, amoj: true, tri: true, padr: true },
   catOn: Object.fromEntries(CAPAS.flatMap((c) => c.cats.map((k) => [`${c.id}:${k}`, !(c.apagadas || []).includes(k)]))),
   abiertoArbol: Object.fromEntries(CAPAS.map((c) => [c.id, c.on])),
-  f: { mias: false, texto: "", director: "", licitacion: "", estructura: "", anio: "" },
+  f: { mias: false, texto: "", director: "", licitacion: "", estructura: "", sub: "", anio: "" },
   abierta: null, tab: "capas",
   mapa: null, base: {}, marcadores: new Map(), primeraVez: true,
   baseNombre: "Gris (como QGIS)", deptosOn: true, callesGris: 0.3,
@@ -187,13 +187,21 @@ function pasaFiltros(tipo, o) {
   if (f.licitacion && o.licitacion !== f.licitacion) return false;
   if (f.anio && String(o.anio ?? "") !== f.anio) return false;
   if (f.estructura) {
-    if (tipo !== "estructura") return false;
-    if (forma(tipo, o) !== f.estructura) return false;
+    // Tipo: Mástil, Monopolo u Obra; y según eso, la altura o el tipo de obra
+    if (f.estructura === "obra") {
+      if (tipo !== "obra") return false;
+      if (f.sub && normal(o.descripcion) !== normal(f.sub)) return false;
+    } else {
+      if (tipo !== "estructura" || forma(tipo, o) !== f.estructura) return false;
+      if (f.sub && alturaDe(o) !== f.sub) return false;
+    }
   }
   if (t && ![o.codigo, o.localidad, o.licitacion, o.estructura, o.sala, o.tarea].some((v) => normal(v).includes(t))) return false;
   return true;
 }
-const filtrosActivos = () => ["mias", "texto", "director", "licitacion", "estructura", "anio"].filter((k) => S.f[k]).length;
+// altura de la estructura, sacada del tipo («MÁSTIL 100» → «100»)
+const alturaDe = (o) => (String(o.estructura || "").match(/\d+(?:[.,]\d+)?/) || [""])[0].replace(",", ".");
+const filtrosActivos = () => ["mias", "texto", "director", "licitacion", "estructura", "sub", "anio"].filter((k) => S.f[k]).length;
 
 // Una entrada por capa en la que está cada elemento (una estructura terminada sin
 // recepción definitiva aparece en Recepciones y en Terminadas).
@@ -302,6 +310,7 @@ const buscarElemento = (tipo, id) => S.datos[DATOS_DE_CAPA[tipo] || tipo]?.find(
 // columna de la capa → campo de la web (ESTRUCTURA → estructura, FIN PREVISTO → fin_previsto…)
 function campoDe(tipo, col) {
   if (col === "ESTADO" || col === "Estado") return "estado";
+  if (col === "OI" || col === "ART") return col.toLowerCase();
   const c = (CAMPOS_EDITABLES[tipo] || []).find((x) => x[0] === col);
   return c ? c[1] : null;
 }
@@ -2306,26 +2315,35 @@ function pintarFiltros() {
     <label>Buscar<input type="search" name="texto" value="${esc(S.f.texto)}" placeholder="Código, localidad, licitación o tarea"></label>
     <label>Director de obra<select name="director">${opciones(directores, S.f.director, "Todos")}</select></label>
     <label>Licitación<select name="licitacion">${opciones(vals((x) => [x.o.licitacion]), S.f.licitacion, "Todas")}</select></label>
-    <label>Tipo de estructura<select name="estructura">
+    <div class="dos">
+    <label>Tipo<select name="estructura">
       <option value="">Todos</option>
       <option value="triangulo" ${S.f.estructura === "triangulo" ? "selected" : ""}>Mástil</option>
-      <option value="circulo" ${S.f.estructura === "circulo" ? "selected" : ""}>Monopolo</option></select></label>
+      <option value="circulo" ${S.f.estructura === "circulo" ? "selected" : ""}>Monopolo</option>
+      <option value="obra" ${S.f.estructura === "obra" ? "selected" : ""}>Obra</option></select></label>
+    ${!S.f.estructura ? "" : S.f.estructura === "obra"
+      ? `<label>Tipo de obra<select name="sub"><option value="">Todas</option>${[...new Set(S.datos.obra.map((o) => String(o.descripcion || "").trim().toUpperCase()).filter(Boolean))].sort()
+          .map((v) => `<option value="${esc(v)}" ${normal(S.f.sub) === normal(v) ? "selected" : ""}>${esc(v[0] + v.slice(1).toLowerCase())}</option>`).join("")}</select></label>`
+      : `<label>Altura<select name="sub"><option value="">Todas</option>${[...new Set(S.datos.estructura.filter((o) => forma("estructura", o) === S.f.estructura).map(alturaDe).filter(Boolean))]
+          .sort((a, b) => Number(a) - Number(b)).map((v) => `<option value="${v}" ${S.f.sub === v ? "selected" : ""}>${v.replace(".", ",")} m</option>`).join("")}</select></label>`}
+    </div>
     <label>Año<select name="anio">${opciones(vals((x) => [x.o.anio]), S.f.anio, "Todos")}</select></label>
     <button class="boton" type="button" id="limpiar-filtros" ${filtrosActivos() ? "" : "disabled"}>Quitar filtros</button>
     <p class="nota">Los filtros se aplican a todas las capas del mapa y a la lista.</p>
   </form>`;
   const form = $("#form-filtros");
   const leer = () => {
+    const cambioTipo = form.estructura.value !== S.f.estructura;
     S.f = { mias: !!form.mias?.checked, texto: form.texto.value, director: form.director.value,
-      licitacion: form.licitacion.value, estructura: form.estructura.value, anio: form.anio.value };
+      licitacion: form.licitacion.value, estructura: form.estructura.value, sub: cambioTipo ? "" : (form.sub?.value || ""), anio: form.anio.value };
     S.primeraVez = true;
-    pintar(false);
+    pintar(cambioTipo); // al cambiar el tipo se rehace el panel para mostrar Altura o Tipo de obra
     $("#limpiar-filtros").disabled = !filtrosActivos();
   };
   form.onchange = leer;
   form.texto.oninput = leer;
   $("#limpiar-filtros").onclick = () => {
-    S.f = { mias: false, texto: "", director: "", licitacion: "", estructura: "", anio: "" };
+    S.f = { mias: false, texto: "", director: "", licitacion: "", estructura: "", sub: "", anio: "" };
     pintar();
   };
 }
@@ -2603,7 +2621,7 @@ function pintarFicha(tipo, o, hitos, notas) {
     </div>
 
     <div class="ficha-bloque">
-      <h2>Hitos</h2>
+      <div class="bloque-titulo"><h2>Hitos</h2>${ayudamemoriaHtml(o)}</div>
       ${hitos == null ? `<p class="nota">Sin conexión: los hitos se ven cuando vuelva la señal.</p>`
         : hitos.length ? hitos.map((h) => hitoHtml(h) + (h.etapa === 2 && h.estado === "HECHO" ? finPrevistoHtml(o) : "")).join("")
         : `<p class="nota">Esta obra no tiene hitos cargados.</p>`}
@@ -2663,6 +2681,7 @@ function pintarFicha(tipo, o, hitos, notas) {
       await abrirFicha(tipo, o.id);
     } catch (e) { aviso(e.message, true); cc.disabled = false; cc.querySelector("span").textContent = "Crear carpeta"; }
   };
+  enlazarAyudamemoria(ficha, tipo, o);
   const ed = $("#editar-datos", ficha);
   if (ed) ed.onclick = () => editarDatos(tipo, o);
   const ce = $("#cambiar-estado", ficha);
@@ -2686,6 +2705,32 @@ function finPrevistoHtml(o) {
     <label for="fin-previsto">Fin previsto</label>
     ${editor() ? `<input type="date" id="fin-previsto" value="${esc(String(o.fin_previsto || "").slice(0, 10))}">` : `<b>${fecha(o.fin_previsto)}</b>`}
     <span>${estado}</span></div>`;
+}
+
+// Ayudamemoria OI y ART: dos tildes sueltos, no cambian etapas ni hitos (columnas OI y ART de la capa)
+const AYUDAMEMORIA = [["OI", "oi", "OI"], ["ART", "art", "ART"]];
+const tildado = (v) => v === true || v === "true" || v === "t" || v === 1;
+function ayudamemoriaHtml(o) {
+  return `<div class="ayudamemoria">${AYUDAMEMORIA.map(([col, k, txt]) => `<label class="ayuda${tildado(o[k]) ? " hecho" : ""}" title="Ayudamemoria: tildalo cuando esté hecho">
+    <input type="checkbox" data-ayuda="${col}" ${tildado(o[k]) ? "checked" : ""} ${editor() ? "" : "disabled"}> ${txt}</label>`).join("")}</div>`;
+}
+function enlazarAyudamemoria(ficha, tipo, o) {
+  ficha.querySelectorAll("[data-ayuda]").forEach((c) => (c.onchange = async () => {
+    const col = c.dataset.ayuda, k = AYUDAMEMORIA.find((a) => a[0] === col)[1];
+    c.disabled = true;
+    try {
+      await S.api.guardarDatos(tipo, o.id, { [col]: c.checked });
+      o[k] = c.checked;
+      const base = S.datos[tipo].find((x) => x.id === o.id);
+      if (base) base[k] = c.checked;
+      cambiarFichaGuardada(tipo, o.id, (g) => { g.o[k] = c.checked; });
+      guardarDatos();
+      c.closest(".ayuda").classList.toggle("hecho", c.checked);
+    } catch (e) {
+      c.checked = !c.checked;
+      aviso(/no hay campos|column/i.test(e.message) ? "Falta preparar la base para OI y ART: corré sql/parte22_ayudamemoria.sql en Neon y tocá Refresh schema cache." : e.message, true, 9000);
+    } finally { c.disabled = !editor(); }
+  }));
 }
 
 function hitoHtml(h) {

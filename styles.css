@@ -553,3 +553,7 @@ button.atajo { font: inherit; cursor: pointer; }
 .lista-pend .dos, .lista-pend li > div:last-child { display: flex; gap: 8px; flex-wrap: wrap; }
 .pend-problema { margin: 0; color: #FFB4A9; font-size: 13px; }
 .sin-subir { padding: 0 6px; border-radius: 4px; background: rgba(46,111,122,.35); color: #9BE1EA; font-size: 11px; font-weight: 600; }
+.ayudamemoria { display: flex; gap: 6px; }
+.ayuda { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--linea); border-radius: 999px; font-size: 13px; font-weight: 600; color: var(--tinta-suave); cursor: pointer; user-select: none; }
+.ayuda input { margin: 0; accent-color: #3BA55C; }
+.ayuda.hecho { border-color: #2F7A45; background: rgba(59,165,92,.16); color: #9EE2B0; }
