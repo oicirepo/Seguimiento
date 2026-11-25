@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-25-6";
+import { crearApi } from "./api.js?v=2026-11-25-7";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -2621,8 +2621,8 @@ function pintarFicha(tipo, o, hitos, notas) {
     </div>
 
     <div class="ficha-bloque">
-      <h2>Hitos</h2>
       ${ayudamemoriaHtml(o)}
+      <h2>Hitos</h2>
       ${hitos == null ? `<p class="nota">Sin conexión: los hitos se ven cuando vuelva la señal.</p>`
         : hitos.length ? hitos.map((h) => hitoHtml(h) + (h.etapa === 2 && h.estado === "HECHO" ? finPrevistoHtml(o) : "")).join("")
         : `<p class="nota">Esta obra no tiene hitos cargados.</p>`}

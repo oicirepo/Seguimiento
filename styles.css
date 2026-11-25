@@ -553,11 +553,12 @@ button.atajo { font: inherit; cursor: pointer; }
 .lista-pend .dos, .lista-pend li > div:last-child { display: flex; gap: 8px; flex-wrap: wrap; }
 .pend-problema { margin: 0; color: #FFB4A9; font-size: 13px; }
 .sin-subir { padding: 0 6px; border-radius: 4px; background: rgba(46,111,122,.35); color: #9BE1EA; font-size: 11px; font-weight: 600; }
-.ayudamemoria { display: flex; gap: 18px; margin: -4px 0 8px; font-size: 12px; color: var(--tinta-suave); }
+.ayudamemoria { display: flex; justify-content: center; gap: 28px; margin: 0 0 12px; padding-bottom: 12px; border-bottom: 1px solid var(--linea-suave, #3a3a3a); font-size: 12px; color: var(--tinta-suave); }
 .ayuda { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
 .ayuda input { margin: 0; width: 14px; height: 14px; accent-color: #3BA55C; }
 .ayuda.hecho { color: #9EE2B0; }
-.codigo-fila { display: flex; align-items: center; justify-content: space-between; gap: 14px; position: relative; }
+.codigo-fila { display: flex; align-items: center; justify-content: space-between; gap: 14px; position: relative; margin: 6px 0 2px; }
+.codigo-fila .codigo { margin: 0; }
 .candado { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 2px 6px; border: 1px solid transparent; border-radius: 999px; background: none; color: var(--tinta-suave); font: 500 11px/1.2 inherit; cursor: pointer; }
 .candado:hover:not(:disabled) { border-color: var(--linea); }
 .candado:disabled { cursor: default; }
