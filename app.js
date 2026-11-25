@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-25-4";
+import { crearApi } from "./api.js?v=2026-11-25-5";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -2740,7 +2740,6 @@ function enlazarAyudamemoria(ficha, tipo, o) {
 // Si está mal, se elige otro a mano (columna CANDADO; vacía = automático).
 const CANDADOS = {
   negro:    { nombre: "Negro",                      color: "#141414", borde: "#9a9a9a" },
-  plateado: { nombre: "Negro con punta plateada",   color: "#141414", borde: "#d9dde2", punta: true },
   gris:     { nombre: "Gris",                       color: "#9e9e9e" },
   rojo:     { nombre: "Rojo",                       color: "#e53935" },
   amarillo: { nombre: "Amarillo",                   color: "#f2d024" },
@@ -2755,18 +2754,18 @@ const CANDADO_DEPTO = {
   LAVALLEJA: "gris", MALDONADO: "gris", ROCHA: "gris",
   "SAN JOSE": "rojo", COLONIA: "marron", "RIO NEGRO": "lila", SORIANO: "lila",
   "CERRO LARGO": "verde", RIVERA: "verde", TACUAREMBO: "verde", "TREINTA Y TRES": "verde",
-  MONTEVIDEO: "plateado", DURAZNO: "plateado", FLORES: "plateado", FLORIDA: "plateado", CANELONES: "plateado",
+  MONTEVIDEO: "negro", DURAZNO: "negro", FLORES: "negro", FLORIDA: "negro", CANELONES: "negro",
 };
-// Canelones se reparte en tres zonas: se toma la localidad del listado más cercana (ubicaciones aproximadas)
+// Canelones se reparte en tres zonas (Pando, Atlántida y el resto): se toma la localidad del listado más cercana (ubicaciones aproximadas)
 const CANELONES_ZONAS = [
   ["amarillo", -34.717, -55.958], ["amarillo", -34.754, -56.003], ["amarillo", -34.700, -55.897], ["amarillo", -34.545, -55.872],
   ["amarillo", -34.651, -56.063], ["amarillo", -34.733, -56.036], ["amarillo", -34.552, -55.990], ["amarillo", -34.620, -56.080],
   ["azul", -34.772, -55.759], ["azul", -34.799, -55.380], ["azul", -34.782, -55.307], ["azul", -34.756, -55.683], ["azul", -34.763, -55.590],
   ["azul", -34.488, -55.627], ["azul", -34.495, -55.560], ["azul", -34.765, -55.720], ["azul", -34.775, -55.836], ["azul", -34.684, -55.701],
-  ["plateado", -34.523, -56.278], ["plateado", -34.727, -56.219], ["plateado", -34.665, -56.217], ["plateado", -34.453, -56.391],
-  ["plateado", -34.343, -55.763], ["plateado", -34.293, -55.957], ["plateado", -34.500, -56.040], ["plateado", -34.440, -55.960],
-  ["plateado", -34.450, -56.080], ["plateado", -34.830, -55.975], ["plateado", -34.800, -55.920], ["plateado", -34.860, -56.050],
-  ["plateado", -34.730, -56.100], ["plateado", -34.600, -56.360], ["plateado", -34.760, -56.160],
+  ["negro", -34.523, -56.278], ["negro", -34.727, -56.219], ["negro", -34.665, -56.217], ["negro", -34.453, -56.391],
+  ["negro", -34.343, -55.763], ["negro", -34.293, -55.957], ["negro", -34.500, -56.040], ["negro", -34.440, -55.960],
+  ["negro", -34.450, -56.080], ["negro", -34.830, -55.975], ["negro", -34.800, -55.920], ["negro", -34.860, -56.050],
+  ["negro", -34.730, -56.100], ["negro", -34.600, -56.360], ["negro", -34.760, -56.160],
 ];
 // departamentoDe(lat, lon) está más abajo (es el mismo que usa «Punto nuevo»)
 function candadoAuto(o) {
@@ -2788,7 +2787,7 @@ function candadoHtml(tipo, o) {
   const nombre = CANDADOS[clave]?.nombre || "sin datos";
   return `<button type="button" class="candado" id="candado" ${editor() ? "" : "disabled"}
       title="Candado: ${esc(nombre)}${auto ? " (automático, según la zona)" : " (elegido a mano)"}${editor() ? ". Tocá para cambiarlo" : ""}">
-      ${puntoCandado(clave)}<span>${esc(nombre)}${auto && clave ? "" : ""}</span></button>`;
+      <span>${esc(nombre)}</span>${puntoCandado(clave, 11)}</button>`;
 }
 function enlazarCandado(ficha, tipo, o) {
   const b = $("#candado", ficha);

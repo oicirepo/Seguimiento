@@ -5,7 +5,7 @@
 --
 -- - Agrega la columna "CANDADO" (texto) a "Estructuras OICI Obra" y a "Obras".
 --   Vacía = la web pone el color según la zona del listado de candados; con un valor
---   (negro, gris, rojo, amarillo, azul, marron, plateado, lila, verde, blanco) es el color elegido a mano.
+--   (negro, gris, rojo, amarillo, azul, marron, lila, verde, blanco) es el color elegido a mano.
 -- Requiere la parte 22 (OI y ART).
 -- =====================================================================
 BEGIN;
