@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-24-2";
+import { crearApi } from "./api.js?v=2026-11-25-1";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -528,11 +528,40 @@ async function actualizar() {
   }
 }
 
-async function cargar() {
+// Si una capa que tenía datos vuelve vacía, casi seguro el pedido salió sin sesión (la sesión se estaba
+// renovando al abrir la web): se pide de nuevo un par de veces antes de dar por buena la capa vacía.
+async function traerSinVaciar(pedir, antes, nombre) {
+  let r = await pedir();
+  for (let i = 0; i < 3 && (!r || !r.length) && antes?.length; i++) {
+    anotarError(new Error(`${nombre} llegó vacía (antes había ${antes.length}): reintento ${i + 1}`));
+    await new Promise((ok) => setTimeout(ok, 1200 * (i + 1)));
+    await S.api.sesionLista?.().catch(() => {});
+    r = await pedir();
+  }
+  return r;
+}
+
+// Una sola carga a la vez: si se pide otra mientras tanto, se hace una más al terminar
+// (así una respuesta vieja nunca pisa a una nueva).
+function cargar() {
+  if (S.cargando) { S.otraCarga = true; return S.cargando; }
+  S.cargando = (async () => {
+    try {
+      do { S.otraCarga = false; await cargarUnaVez(); } while (S.otraCarga);
+    } finally { S.cargando = null; }
+  })();
+  return S.cargando;
+}
+
+async function cargarUnaVez() {
   const habia = S.datos.estructura.length || S.datos.obra.length;
   estadoDatos("actualizando");
   try {
-    const [e, o] = await conTiempo(Promise.all([S.api.estructuras(), S.api.obras()]), 30000);
+    // primero que la sesión esté lista: si un pedido sale sin sesión, la base contesta «nada» en vez de un error
+    await conTiempo(S.api.sesionLista?.() ?? Promise.resolve(), 20000).catch(() => {});
+    const [e, o] = await conTiempo(Promise.all([
+      traerSinVaciar(() => S.api.estructuras(), S.datos.estructura, "Estructuras"),
+      traerSinVaciar(() => S.api.obras(), S.datos.obra, "Obras")]), 45000);
     S.datos.estructura = e || [];
     S.datos.obra = o || [];
   } catch (e) {
@@ -553,7 +582,7 @@ async function cargar() {
     return;
   }
   try {
-    S.datos.relev = (await conTiempo(S.api.relevamiento(), 20000)) || [];
+    S.datos.relev = (await conTiempo(traerSinVaciar(() => S.api.relevamiento(), S.datos.relev, "Relevamiento"), 30000)) || [];
     S.relevFalta = false;
   } catch (e) {
     if (!sinRed(e)) {

@@ -43,6 +43,15 @@ async function crearNeon() {
       const r = await neon.auth.getSession();
       return r?.data?.user || null;
     },
+    // espera a tener la sesión con su token (al abrir, la sesión puede estar renovándose)
+    async sesionLista() {
+      for (let i = 0; i < 4; i++) {
+        const r = await neon.auth.getSession();
+        if (r?.data?.session?.token || !r?.data?.user) return !!r?.data?.session?.token;
+        await new Promise((ok) => setTimeout(ok, 500 * (i + 1)));
+      }
+      return false;
+    },
     async entrar(email, password) {
       const r = await neon.auth.signIn.email({ email, password });
       if (r?.error) throw new Error(r.error.message || "No se pudo iniciar sesión");
@@ -194,6 +203,7 @@ async function crearNeon() {
 
 // ---------------------------------------------------------------- demostración
 function crearDemo() {
+  let vacioPrimero = new URLSearchParams(location.search).has("vacio");
   const hoy = new Date();
   const dia = (n) => new Date(hoy.getTime() + n * 864e5).toISOString().slice(0, 10);
   const E = (id, codigo, estado, etapa, lat, lon, extra = {}) => ({
@@ -213,7 +223,7 @@ function crearDemo() {
     E(6, "PBS", "FIN", 5, -32.4, -54.4, fin(700)),
     E(7, "R6E", "FIN", 5, -33.2, -54.9, fin(600)),
     E(8, "CO1", "FIN", 5, -34.4, -57.8, fin(200)),
-    E(9, "ATT", "FIN", 5, -34.9, -56.05, { ...fin(800), planos: "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345" }),
+    E(9, "ATT", "FIN", 5, -34.9, -56.05, { ...fin(800), ...(new URLSearchParams(location.search).has("papelera") ? { planos: "https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUvWxYz012345" } : {}) }),
     E(10, "MRJ", "FIN", 6, -34.7, -55.95, { ...fin(900), recepcion: "RD" }),
   ];
   const obr = [
@@ -372,7 +382,8 @@ function crearDemo() {
       Object.assign(cuentas.find((c) => c.user_id === id), { nombre: null, rol: null, iniciales_do: null, habilitado: false });
     },
     async estructuras() { await espera(); return structuredClone(est); },
-    async obras() { await espera(); return structuredClone(obr); },
+    // ?vacio=1: la primera vez Obras llega vacía, como cuando el pedido sale sin sesión (para probar el reintento)
+    async obras() { await espera(); if (vacioPrimero) { vacioPrimero = false; return []; } return structuredClone(obr); },
     async relevamiento() { await espera(); return structuredClone(relev); },
     async agrimensura() { await espera(); return structuredClone(agri); },
     // en la demostración el usuario es administrador: el cambio se aplica enseguida
