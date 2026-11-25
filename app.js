@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-25-1";
+import { crearApi } from "./api.js?v=2026-11-25-2";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -128,6 +128,7 @@ function aviso(texto, mal = false, ms = 0) {
   d.textContent = texto;
   $("#avisos").append(d);
   setTimeout(() => d.remove(), ms || (mal ? 6000 : 2500));
+  return d;
 }
 
 // ------------------------------------------------------------ estado
@@ -268,16 +269,311 @@ function estadoDatos(modo) {
   el.title = modo === "sinred" ? "Tocá para reintentar" : "";
 }
 async function salirCuenta() {
+  const n = misPend().length;
+  if (n && !confirm(`Tenés ${n} cambio${n === 1 ? "" : "s"} hecho${n === 1 ? "" : "s"} sin conexión que todavía no se ${n === 1 ? "subió" : "subieron"}. Si salís, se pierden. ¿Salir igual?`)) return;
   try {
-    if (!S.api) S.api = await conTiempo(crearApi(), 20000);
+    if (!S.api) S.api = envolverApi(await conTiempo(crearApi(), 20000));
     await conTiempo(S.api.salir(), 15000);
   } catch (e) {
     aviso("No se pudo cerrar la sesión porque no hay conexión con Neon. Probá de nuevo en un rato.", true);
     return;
   }
   borrarGuardado();
+  try { localStorage.removeItem(CLAVE_PEND); } catch (e) { /* nada */ }
   location.reload();
 }
+
+// ------------------------------------------------------------ cambios sin conexión
+// Sin señal, los cambios de situación, datos, hitos, cuaderno y puntos nuevos quedan guardados en
+// este dispositivo (lista de pendientes) y se suben solos, en orden, cuando vuelve la conexión.
+// Si mientras tanto otra persona cambió lo mismo, no se pisa: queda marcado para que elijas.
+const CLAVE_PEND = "obras-oici-pendientes-v1" + (DEMO ? "-demo" : "");
+const OPS_SIN_RED = ["cambiarEstado", "guardarDatos", "marcarHito", "agregarNota", "crearPunto"];
+const DATOS_DE_CAPA = { estructura: "estructura", obra: "obra", relevamiento: "relev", amojonamiento: "amoj" };
+const NOMBRE_NUEVO = { estructura: "Estructura", obra: "Obra", relevamiento: "Punto de relevamiento", amojonamiento: "Mojón" };
+S.pend = leerJSON(CLAVE_PEND) || [];
+const misPend = () => S.pend.filter((p) => p.email === S.usuario?.email);
+const esperando = () => misPend().filter((p) => !p.conflicto && !p.error);
+// el pedido no llegó al servidor (sin señal); un tiempo agotado no cuenta: pudo haberse guardado
+const fallaDeRed = (e) => !navigator.onLine || /failed to fetch|networkerror|load failed|network request failed/i.test(String(e?.message || e));
+function guardarPend() { escribirJSON(CLAVE_PEND, S.pend); pintarPend(); }
+
+const buscarElemento = (tipo, id) => S.datos[DATOS_DE_CAPA[tipo] || tipo]?.find((x) => x.id === id);
+// columna de la capa → campo de la web (ESTRUCTURA → estructura, FIN PREVISTO → fin_previsto…)
+function campoDe(tipo, col) {
+  if (col === "ESTADO" || col === "Estado") return "estado";
+  const c = (CAMPOS_EDITABLES[tipo] || []).find((x) => x[0] === col);
+  return c ? c[1] : null;
+}
+const normalPend = (v, campo) => (v == null ? "" : /fecha|fin_previsto/.test(campo || "") ? String(v).slice(0, 10) : String(v));
+function cambiarFichaGuardada(tipo, id, fn) {
+  const t = leerJSON(CLAVE_FICHAS) || {}, g = t[`${tipo}:${id}`];
+  if (!g) return;
+  fn(g);
+  escribirJSON(CLAVE_FICHAS, t);
+}
+// hito → estructura u obra a la que pertenece (se busca en las fichas guardadas en el dispositivo)
+function contextoHito(hid) {
+  const t = leerJSON(CLAVE_FICHAS) || {};
+  for (const [k, g] of Object.entries(t)) {
+    const h = (g.hitos || []).find((x) => x.id === hid);
+    if (h) { const [tipo, id] = k.split(":"); return { tipo, id: Number(id), h, codigo: g.o?.codigo }; }
+  }
+  return null;
+}
+function cambiosComoCampos(p) {
+  const [tipo, , x] = p.args;
+  return p.op === "cambiarEstado" ? { estado: x } : Object.fromEntries(Object.entries(x).map(([c, v]) => [campoDe(tipo, c), v]).filter(([c]) => c));
+}
+
+// El cambio se ve enseguida en el mapa, la lista y la ficha, aunque todavía no se haya subido
+function aplicarLocal(p) {
+  const [a0, a1, a2] = p.args;
+  if (p.op === "crearPunto") {
+    const [capa, lat, lon, d] = p.args, k = DATOS_DE_CAPA[capa];
+    if (!k || !S.datos[k]) return;
+    const o = { id: p.tmp, pendiente: true, lat, lon, codigo: d["CÓDIGO"] ?? null,
+      descripcion: d.DESCRIPCION ?? d["Descripción"] ?? null, z: d.Z ?? null, hitos_hechos: 0, hitos_total: 0, etapa: 1 };
+    if (capa === "estructura" || capa === "obra") o.estado = d.ESTADO || d.Estado || "PROY";
+    for (const [col, campo] of CAMPOS_EDITABLES[capa] || []) if (d[col] != null) o[campo] = d[col];
+    const i = S.datos[k].findIndex((x) => x.id === p.tmp);
+    if (i >= 0) S.datos[k][i] = o; else S.datos[k].push(o);
+  } else if (p.op === "guardarDatos" || p.op === "cambiarEstado") {
+    const campos = cambiosComoCampos(p);
+    const o = buscarElemento(a0, a1);
+    if (o) Object.assign(o, campos);
+    cambiarFichaGuardada(a0, a1, (g) => Object.assign(g.o, campos));
+  } else if (p.op === "marcarHito") {
+    const c = p.ctx || contextoHito(a0);
+    if (c) cambiarFichaGuardada(c.tipo, c.id, (g) => { const h = (g.hitos || []).find((x) => x.id === a0); if (h) Object.assign(h, a1); });
+  } else if (p.op === "agregarNota") {
+    cambiarFichaGuardada(a0, a1, (g) => {
+      g.notas = g.notas || [];
+      if (!g.notas.some((n) => n.id === -p.n)) g.notas.unshift({ id: -p.n, ...a2, pendiente: true });
+    });
+  }
+}
+// después de bajar los datos de Neon, lo que falta subir se vuelve a poner encima
+function reaplicarPendientes() { for (const p of misPend()) aplicarLocal(p); }
+
+function descripcionPend(op, args) {
+  const [a0, a1, a2] = args;
+  const cod = (t, id) => buscarElemento(t, id)?.codigo || NOMBRE_TIPO[t] || "";
+  if (op === "crearPunto") return `${NOMBRE_NUEVO[a0] || "Punto"} nuevo${args[3]["CÓDIGO"] ? ": " + args[3]["CÓDIGO"] : ""}`;
+  if (op === "cambiarEstado") return `${cod(a0, a1)}: situación → ${(SITUACIONES.find((s) => s[0] === a2) || [, a2])[1]}`;
+  if (op === "guardarDatos") {
+    const nombres = Object.keys(a2).map((c) => (CAMPOS_EDITABLES[a0] || []).find((x) => x[0] === c)?.[2] || c);
+    return `${cod(a0, a1)}: ${nombres.join(", ")}`;
+  }
+  if (op === "marcarHito") {
+    const c = contextoHito(a0);
+    return `${c?.codigo || "Hito"}: ${c?.h?.nombre || "hito"} → ${a1.estado ? a1.estado.toLowerCase() : "fecha " + fecha(a1.fecha_real)}`;
+  }
+  if (op === "agregarNota") return `${cod(a0, a1)}: nota en el cuaderno`;
+  return op;
+}
+
+function encolar(op, args) {
+  const [a0, a1] = args;
+  // cambios a un punto nuevo que todavía no se subió: se suman al pedido de crearlo
+  if ((op === "guardarDatos" || op === "cambiarEstado") && a1 < 0) {
+    const c = S.pend.find((p) => p.op === "crearPunto" && p.tmp === a1);
+    if (!c) throw new Error("Ese punto nuevo ya no está en la lista de cambios sin subir.");
+    Object.assign(c.args[3], op === "guardarDatos" ? args[2] : { [a0 === "estructura" ? "ESTADO" : "Estado"]: args[2] });
+    aplicarLocal(c); guardarPend(); guardarDatos(); avisoEncolado();
+    return;
+  }
+  if ((op === "agregarNota" && a1 < 0) || (op === "marcarHito" && contextoHito(a0)?.id < 0))
+    throw new Error("Este punto todavía no se subió: los hitos y el cuaderno se pueden cargar cuando vuelva la señal.");
+  const p = { n: Date.now() + S.pend.length, op, args: structuredClone(args), email: S.usuario?.email, cuando: Date.now(), txt: descripcionPend(op, args) };
+  if (op === "guardarDatos" || op === "cambiarEstado") {
+    const o = buscarElemento(a0, a1);
+    if (o) p.antes = Object.fromEntries(Object.keys(cambiosComoCampos(p)).map((c) => [c, o[c] ?? null]));
+  }
+  if (op === "marcarHito") {
+    const c = contextoHito(a0);
+    if (c) { p.ctx = { tipo: c.tipo, id: c.id }; p.antes = Object.fromEntries(Object.keys(args[1]).map((k) => [k, c.h[k] ?? null])); }
+  }
+  if (op === "crearPunto") p.tmp = -p.n;
+  S.pend.push(p);
+  aplicarLocal(p);
+  guardarPend(); guardarDatos();
+  avisoEncolado();
+  pintar(false);
+  return op === "crearPunto" ? p.tmp : undefined;
+}
+function avisoEncolado() {
+  const n = esperando().length;
+  aviso(`Sin señal: quedó guardado en este dispositivo y se sube solo cuando vuelva la conexión (${n} sin subir).`, false, 5000);
+}
+
+// Las funciones que cambian datos pasan por acá: con señal van directo; sin señal, a la lista
+function envolverApi(api) {
+  if (!api || api.__real) return api;
+  const real = {};
+  for (const op of OPS_SIN_RED) {
+    if (typeof api[op] !== "function") continue;
+    real[op] = api[op].bind(api);
+    api[op] = async (...args) => {
+      if (navigator.onLine) {
+        if (esperando().length) await subirPendientes();       // primero lo anterior, para respetar el orden
+        if (!esperando().length && !(args[1] < 0 && op !== "crearPunto")) {
+          try { return await real[op](...args); }
+          catch (e) { if (!fallaDeRed(e)) throw e; }
+        }
+      }
+      return encolar(op, args);
+    };
+  }
+  api.__real = real;
+  return api;
+}
+
+// ¿Alguien cambió lo mismo mientras no había señal? Devuelve las diferencias o null
+async function conflictoDe(p) {
+  if (!p.antes) return null;
+  let actual, nuevo;
+  if (p.op === "marcarHito") {
+    if (!p.ctx) return null;
+    const hitos = await S.api.hitos(p.ctx.tipo, p.ctx.id);
+    actual = (hitos || []).find((h) => h.id === p.args[0]);
+    nuevo = p.args[1];
+  } else {
+    actual = await S.api.una(p.args[0], p.args[1]);
+    nuevo = cambiosComoCampos(p);
+  }
+  if (!actual) return [{ campo: "", base: "ya no existe (alguien lo borró)", mio: "" }];
+  const dif = [];
+  for (const [c, antes] of Object.entries(p.antes)) {
+    const b = normalPend(actual[c], c), a = normalPend(antes, c), m = normalPend(nuevo[c], c);
+    if (b !== a && b !== m) dif.push({ campo: c, base: actual[c], mio: nuevo[c] });
+  }
+  return dif.length ? dif : null;
+}
+
+async function subirPendientes() {
+  if (S.subiendo || !S.api?.__real || !navigator.onLine || !esperando().length) return;
+  S.subiendo = true;
+  pintarPend();
+  let ok = 0, reabrir = null;
+  const nuevos = [];
+  try {
+    for (const p of esperando()) {
+      try {
+        if (!p.forzar) {
+          const c = await conflictoDe(p);
+          if (c) { p.conflicto = c; guardarPend(); continue; }
+        }
+        const r = await S.api.__real[p.op](...p.args);
+        if (p.op === "crearPunto") nuevos.push({ capa: p.args[0], id: r, codigo: p.args[3]["CÓDIGO"], planos: p.args[3].PLANOS || p.args[3].Planos });
+        if (p.op === "crearPunto" && S.abierta?.id === p.tmp) reabrir = { tipo: S.abierta.tipo, id: Number(r) };
+        S.pend = S.pend.filter((x) => x !== p);
+        ok++;
+        guardarPend();
+      } catch (e) {
+        if (fallaDeRed(e)) break;            // se cortó la señal otra vez: sigue la próxima
+        p.error = e.message; guardarPend();
+      }
+    }
+  } finally {
+    S.subiendo = false;
+    pintarPend();
+  }
+  // carpeta de planos en Drive para las estructuras y obras nuevas que se cargaron sin señal
+  for (const x of nuevos) if (!x.planos && COLUMNA_PLANOS[x.capa]) await carpetaPlanos(x.capa, x.id, x.codigo).catch(anotarError);
+  if (ok) {
+    aviso(`Se ${ok === 1 ? "subió 1 cambio hecho" : `subieron ${ok} cambios hechos`} sin conexión`, false, 6000);
+    await cargar();
+    // la ficha abierta era de un punto nuevo: se vuelve a abrir, ya con su número de la base
+    if (reabrir?.id) await abrirFicha(reabrir.tipo, reabrir.id);
+    else if (S.abierta && S.abierta.id > 0) await abrirFicha(S.abierta.tipo, S.abierta.id);
+  }
+  const revisar = misPend().filter((p) => p.conflicto || p.error).length;
+  if (revisar && !S.avisoRevisar) {
+    S.avisoRevisar = true;
+    const d = aviso(`${revisar === 1 ? "Un cambio hecho" : `${revisar} cambios hechos`} sin conexión no se ${revisar === 1 ? "pudo" : "pudieron"} subir. Tocá acá para revisar${revisar === 1 ? "lo" : "los"}.`, true, 12000);
+    d.style.cursor = "pointer"; d.style.pointerEvents = "auto";
+    d.onclick = () => { d.remove(); abrirPendientes(); };
+  }
+}
+
+// Botón «N sin subir» arriba del mapa y la ventana para revisar la lista
+function pintarPend() {
+  let b = $("#pendientes");
+  if (!b) {
+    const zona = $(".mapa-zona");
+    if (!zona) return;
+    b = document.createElement("button");
+    b.id = "pendientes"; b.type = "button"; b.className = "pendientes";
+    b.onclick = abrirPendientes;
+    zona.append(b);
+  }
+  const mios = misPend(), revisar = mios.filter((p) => p.conflicto || p.error).length;
+  b.hidden = !mios.length;
+  b.dataset.revisar = revisar ? "1" : "";
+  b.textContent = S.subiendo ? "Subiendo cambios…" : `${mios.length} sin subir${revisar ? ` · ${revisar} para revisar` : ""}`;
+  b.title = "Cambios hechos sin conexión: tocá para verlos";
+  if ($("#lista-pend")) llenarPendientes();
+}
+function etiquetaPend(p, campo) {
+  if (campo === "estado") return p.op === "marcarHito" ? "el hito" : "Situación";
+  if (campo === "fecha_real") return "la fecha del hito";
+  return (CAMPOS_EDITABLES[p.args[0]] || []).find((x) => x[1] === campo)?.[2] || campo;
+}
+function llenarPendientes() {
+  const ul = $("#lista-pend");
+  const mios = misPend();
+  const valor = (v) => (v == null || v === "" ? "vacío" : /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? fecha(String(v).slice(0, 10)) : String(v));
+  ul.innerHTML = mios.length ? mios.map((p) => `<li data-n="${p.n}">
+      <div><b>${esc(p.txt)}</b> <span class="nota">${esc(cuandoTexto(p.cuando))}</span></div>
+      ${p.conflicto ? `<p class="pend-problema">Mientras tanto alguien lo cambió: ${p.conflicto.map((c) => c.campo
+        ? `${esc(etiquetaPend(p, c.campo))} en la base dice «${esc(valor(c.base))}», vos pusiste «${esc(valor(c.mio))}»` : esc(c.base)).join("; ")}.</p>
+        <div class="dos"><button class="boton boton-chico" type="button" data-forzar>Subir el mío igual</button><button class="boton boton-chico" type="button" data-descartar>Descartar el mío</button></div>`
+      : p.error ? `<p class="pend-problema">No se pudo subir: ${esc(p.error)}</p>
+        <div class="dos"><button class="boton boton-chico" type="button" data-reintentar>Probar de nuevo</button><button class="boton boton-chico" type="button" data-descartar>Descartar</button></div>`
+      : `<p class="nota">Esperando señal para subirse.</p><div><button class="boton boton-chico" type="button" data-descartar>Descartar</button></div>`}
+    </li>`).join("") : `<li class="nota">No quedan cambios sin subir.</li>`;
+  ul.querySelectorAll("li[data-n]").forEach((li) => {
+    const p = S.pend.find((x) => String(x.n) === li.dataset.n);
+    if (!p) return;
+    const quitar = async () => {
+      if (!confirm(`¿Descartar «${p.txt}»? Ese cambio no se va a subir.`)) return;
+      S.pend = S.pend.filter((x) => x !== p);
+      guardarPend();
+      await cargar();
+    };
+    li.querySelector("[data-descartar]")?.addEventListener("click", quitar);
+    li.querySelector("[data-forzar]")?.addEventListener("click", () => { delete p.conflicto; p.forzar = true; guardarPend(); subirPendientes(); });
+    li.querySelector("[data-reintentar]")?.addEventListener("click", () => { delete p.error; guardarPend(); subirPendientes(); });
+  });
+}
+function abrirPendientes() {
+  document.querySelector(".modal-fondo")?.remove();
+  const fondo = document.createElement("div");
+  fondo.className = "modal-fondo";
+  fondo.innerHTML = `<div class="modal form" role="dialog" aria-modal="true" aria-labelledby="titulo-pend">
+      <h2 id="titulo-pend">Cambios sin subir</h2>
+      <p class="nota">Los hiciste sin conexión. Están guardados en este dispositivo y se suben solos cuando hay señal. Si borrás los datos del navegador antes, se pierden.</p>
+      <ul class="lista-pend" id="lista-pend"></ul>
+      <div class="dos">
+        <button class="boton" type="button" data-cerrar>Cerrar</button>
+        <button class="boton boton-primario" type="button" id="subir-ahora">Subir ahora</button>
+      </div>
+    </div>`;
+  document.body.append(fondo);
+  const cerrar = () => fondo.remove();
+  fondo.querySelector("[data-cerrar]").onclick = cerrar;
+  fondo.addEventListener("keydown", (e) => { if (e.key === "Escape") cerrar(); });
+  $("#subir-ahora").onclick = () => {
+    if (!navigator.onLine) return aviso("Todavía no hay señal: se suben solos cuando vuelva.", true);
+    for (const p of misPend()) delete p.error;
+    guardarPend();
+    subirPendientes();
+  };
+  llenarPendientes();
+}
+window.addEventListener("online", () => setTimeout(subirPendientes, 1500));
+setInterval(() => { if (esperando().length) subirPendientes(); }, 60000);
 
 // ------------------------------------------------------------ vistas
 function mostrar(vista) {
@@ -299,7 +595,7 @@ async function iniciar() {
     return;
   }
   try {
-    S.api = await conTiempo(crearApi(), 20000);
+    S.api = envolverApi(await conTiempo(crearApi(), 20000));
     S.usuario = await conTiempo(S.api.usuario(), 20000);
   } catch (e) {
     mostrar("vista-ingreso");
@@ -446,6 +742,7 @@ function ponerUsuario() {
 }
 
 function mostrarApp() {
+  setTimeout(pintarPend, 0);
   mostrar("vista-app");
   ponerUsuario();
   if (S.appLista) return;
@@ -501,7 +798,7 @@ async function actualizar() {
   try {
     estadoDatos("actualizando");
     if (!S.api) {
-      try { S.api = await conTiempo(crearApi(), 30000); prepararIngreso(); }
+      try { S.api = envolverApi(await conTiempo(crearApi(), 30000)); prepararIngreso(); }
       catch (e) { S.api = null; anotarError(e); reintentarLuego(); return estadoDatos("sinred"); }
     }
     if (!S.verificado) {
@@ -599,7 +896,9 @@ async function cargarUnaVez() {
   }
   S.datosDe = Date.now();
   S.reintentos = 0;
+  reaplicarPendientes();
   guardarDatos();
+  if (esperando().length) setTimeout(subirPendientes, 500);
   estadoDatos(null);
   cargarSolicitudes();
   pintar();
@@ -2085,7 +2384,7 @@ function enlazarFilas(cont) {
 function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: false, attributionControl: true, maxZoom: 21 }).setView([-32.6, -56.0], 7);
-  if (new URLSearchParams(location.search).has("demo")) window.__mapa = S.mapa; // para las pruebas de la demostración
+  if (new URLSearchParams(location.search).has("demo")) { window.__mapa = S.mapa; window.__S = S; } // para las pruebas de la demostración
   agregarBotonesPaneles();
   L.control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(S.mapa);
   agregarBotonUbicacion();
@@ -2205,6 +2504,12 @@ async function abrirFicha(tipo, id) {
   ficha.hidden = false;
   const g = fichaGuardada(tipo, id);
   const base = S.datos[tipo].find((x) => x.id === id);
+  if (id < 0) {
+    // punto nuevo cargado sin señal: todavía no está en la base
+    if (base) pintarFicha(tipo, base, null, null);
+    pintar();
+    return;
+  }
   if (g) pintarFicha(tipo, g.o, g.hitos, g.notas);
   else {
     ficha.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver a la lista")}<p class="tipo-obra">Cargando…</p></div>`;
@@ -2313,7 +2618,7 @@ function pintarFicha(tipo, o, hitos, notas) {
         <textarea name="texto" required placeholder="Qué pasó, qué se resolvió o qué falta" aria-label="Texto de la entrada"></textarea>
         <button class="boton boton-primario" type="submit">Agregar al cuaderno</button>
       </form>` : ""}
-      ${notas == null ? `<p class="nota">Sin conexión: el cuaderno se ve cuando vuelva la señal.</p>` : notas.length ? notas.map((n) => `<div class="entrada"><div class="meta"><b>${fecha(n.fecha)}</b><span>${esc(n.tipo[0] + n.tipo.slice(1).toLowerCase())}</span><span>${esc(n.autor || "")}</span></div><p>${esc(n.texto)}</p></div>`).join("")
+      ${notas == null ? `<p class="nota">Sin conexión: el cuaderno se ve cuando vuelva la señal.</p>` : notas.length ? notas.map((n) => `<div class="entrada"><div class="meta"><b>${fecha(n.fecha)}</b><span>${esc(n.tipo[0] + n.tipo.slice(1).toLowerCase())}</span><span>${esc(n.autor || "")}</span>${n.pendiente ? `<span class="sin-subir">sin subir</span>` : ""}</div><p>${esc(n.texto)}</p></div>`).join("")
         : `<p class="nota">Todavía no hay entradas. ${editor() ? "Escribí la primera arriba." : ""}</p>`}
     </div>
 
@@ -3318,7 +3623,7 @@ async function limpiarCarpetasViejas() {
 // y su link queda en Planos. Si falla, el punto queda igual y se avisa.
 const COLUMNA_PLANOS = { estructura: "PLANOS", obra: "Planos" };
 async function carpetaPlanos(tipo, id, codigo) {
-  if (!S.api.hayCarpetasDrive || !COLUMNA_PLANOS[tipo] || !id || !codigo) return null;
+  if (!S.api.hayCarpetasDrive || !COLUMNA_PLANOS[tipo] || !id || Number(id) < 0 || !codigo) return null;
   const d = await S.api.carpetaDrive(codigo);
   await S.api.guardarDatos(tipo, Number(id), { [COLUMNA_PLANOS[tipo]]: d.url });
   return d;

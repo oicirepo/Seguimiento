@@ -546,3 +546,10 @@ body.con-tabla .mapa-zona { display: none; }
 }
 button.atajo { font: inherit; cursor: pointer; }
 .dias-atraso { color: #FF6B5E; font-weight: 600; }
+.pendientes { position: absolute; z-index: 800; top: 46px; left: 50%; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px; border: 1px solid #2E6F7A; background: rgba(30,52,56,.95); color: #9BE1EA; font: 600 12.5px/1.2 var(--texto, inherit); white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,.4); cursor: pointer; }
+.pendientes[data-revisar="1"] { border-color: #8A3A33; background: rgba(60,30,28,.95); color: #FFB4A9; }
+.lista-pend { list-style: none; margin: 8px 0 12px; padding: 0; max-height: 55vh; overflow: auto; display: grid; gap: 10px; }
+.lista-pend li { padding: 10px 12px; border: 1px solid var(--linea); border-radius: 8px; display: grid; gap: 6px; }
+.lista-pend .dos, .lista-pend li > div:last-child { display: flex; gap: 8px; flex-wrap: wrap; }
+.pend-problema { margin: 0; color: #FFB4A9; font-size: 13px; }
+.sin-subir { padding: 0 6px; border-radius: 4px; background: rgba(46,111,122,.35); color: #9BE1EA; font-size: 11px; font-weight: 600; }
