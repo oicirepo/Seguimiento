@@ -659,3 +659,18 @@ body.con-medicion { overflow: hidden; }
 .med-alerta { color: #F2C14E; }
 .med-datos .dos { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .med-datos input, .med-datos select, .med-datos textarea { min-width: 0; max-width: 100%; }
+.med-fila { display: flex; gap: 8px; align-items: stretch; }
+.med-fila > button[data-abrir] { flex: 1; }
+.med-borrar { flex: none; width: 48px; display: grid; place-items: center; border: 1px solid var(--linea); border-radius: 10px; background: var(--superficie); color: var(--tinta-suave); cursor: pointer; }
+.med-borrar svg { width: 20px; height: 20px; }
+.med-borrar:hover { color: var(--error); border-color: #6B3D3D; }
+.med-nivel h3 { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.med-valor { margin-left: auto; font: 700 15px var(--cond); color: var(--acento); }
+.cuartos { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
+.cuartos button { min-width: 0; padding: 12px 0; border: 1px solid var(--linea); border-radius: 8px; background: var(--campo); color: var(--tinta); font: 700 16px/1 var(--cond); cursor: pointer; }
+.cuartos button.cero { background: #2c2c2c; }
+.cuartos button.mas { color: #9BE1EA; } .cuartos button.menos { color: #F2C14E; }
+.cuartos button[aria-pressed="true"] { background: var(--acento-fuerte); border-color: var(--acento); color: #fff; }
+.med-uno { max-width: 220px; }
+.med-seguir { width: 100%; margin-top: 14px; }
+@media (max-width: 380px) { .cuartos button { font-size: 14px; padding: 11px 0; } }

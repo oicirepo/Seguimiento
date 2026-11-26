@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-5";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-6";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -2505,6 +2505,7 @@ function pintarMapa(v) {
 // ------------------------------------------------------------ ficha
 // Planos, Google Maps y Waze en una fila (mismos enlaces que arma QGIS).
 const ICONO = {
+  borrar: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 12.5h9l1-12.5M10 11v5.5M14 11v5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   medir: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M8 21h8M12 3l-5 9M12 3l5 9M5 14h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   planos: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   maps: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5s-6.5-6.2-6.5-11.3a6.5 6.5 0 0 1 13 0c0 5.1-6.5 11.3-6.5 11.3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="10.2" r="2.4" fill="currentColor"/></svg>',
@@ -5465,7 +5466,7 @@ function filasDePerfil(tipo, perfil, o) {
       lado1: tramos.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })), lado2: tramos.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })) };
   }
   if (tipo === "verticalidad_mastil") return {
-    medio_parante: d.medio_parante ?? "", desplome_admisible: d.desplome_admisible ?? "",
+    medio_parante: d.medio_parante ?? "", desplome_admisible: d.desplome_admisible ?? "", unidad: "parante",
     niveles: (d.niveles || []).map((n) => ({ altura: n.altura, A: n.A, D: ["", "", ""] })),
   };
   return {
@@ -5700,16 +5701,21 @@ async function abrirMediciones(o, tipo) {
   ul.innerHTML = (aviso_ ? `<li class="nota">${esc(aviso_)}</li>` : "") + (MD.lista.length ? MD.lista.map((m) => {
     const r = m.resultado || resumenMedicion(m, calcularMedicion(m));
     const est = r.cumple == null ? `<span class="med-chip">incompleta</span>` : r.cumple ? `<span class="med-chip si">Cumple</span>` : `<span class="med-chip no">No cumple</span>`;
-    return `<li><button type="button" data-abrir="${esc(m.id)}">
+    return `<li class="med-fila"><button type="button" data-abrir="${esc(m.id)}">
         <span><b>${fecha(String(m.fecha).slice(0, 10))}</b> ${est}${m.borrador && !m.creado ? ` <span class="sin-subir">borrador</span>` : m.pendiente ? ` <span class="sin-subir">sin subir</span>` : ""}</span>
-        <small>${esc(textoResumen(m, r))}${m.datos?.perfil_nombre ? ` · ${esc(m.datos.perfil_nombre)}` : ""}${m.autor ? ` · ${esc(m.autor)}` : ""}</small></button></li>`;
+        <small>${esc(textoResumen(m, r))}${m.datos?.perfil_nombre ? ` · ${esc(m.datos.perfil_nombre)}` : ""}${m.autor ? ` · ${esc(m.autor)}` : ""}</small></button>
+        ${editor() ? `<button type="button" class="med-borrar" data-borrar="${esc(m.id)}" aria-label="Borrar la medición del ${fecha(String(m.fecha).slice(0, 10))}" title="Borrar">${ICONO.borrar}</button>` : ""}</li>`;
   }).join("") : `<li class="nota">Todavía no hay mediciones de esta estructura.${editor() ? " Tocá «Nueva medición» para cargar la primera." : ""}</li>`);
   ul.querySelectorAll("[data-abrir]").forEach((b) => (b.onclick = () => editarMedicion(structuredClone(MD.lista.find((m) => m.id === b.dataset.abrir)))));
+  ul.querySelectorAll("[data-borrar]").forEach((b) => (b.onclick = async () => {
+    const m = MD.lista.find((x) => x.id === b.dataset.borrar);
+    if (await borrarMedicion(m)) abrirMediciones(o, tipo);
+  }));
 }
 
 function pestanasDe(m) {
   if (m.tipo === "verticalidad_monopolo") return [["lado1", "Lado 1"], ["lado2", "Lado 2"], ["resultado", "Resultado"], ["datos", "Datos"]];
-  if (m.tipo === "verticalidad_mastil") return [["niveles", "Lecturas"], ["resultado", "Resultado"], ["datos", "Datos"]];
+  if (m.tipo === "verticalidad_mastil") return [["lado0", "Anclaje 1"], ["lado1", "Anclaje 2"], ["lado2", "Anclaje 3"], ["resultado", "Resultado"], ["datos", "Datos"]];
   return [...m.datos.anclajes.map((a, i) => [`anclaje${i}`, `Anclaje ${a.nombre}`]), ["resultado", "Resultado"], ["datos", "Datos"]];
 }
 function editarMedicion(m) {
@@ -5728,7 +5734,7 @@ function pintarMedicion() {
   const cuerpo = k === "datos" ? datosHtml(m, puede)
     : k === "resultado" ? (m.tipo === "verticalidad_monopolo" ? resultadoHtml(r, d) : m.tipo === "verticalidad_mastil" ? resultadoMastilHtml(r) : resultadoTensionHtml(r))
     : m.tipo === "verticalidad_monopolo" ? ladoHtml(k, d, r, puede)
-    : m.tipo === "verticalidad_mastil" ? nivelesHtml(d, r, puede) : anclajeHtml(Number(k.slice(7)), d, r, puede);
+    : m.tipo === "verticalidad_mastil" ? nivelesHtml(Number(k.slice(4)), d, r, puede) : anclajeHtml(Number(k.slice(7)), d, r, puede);
   p.innerHTML = `${barraMed(`${esc(MED_TIPO[m.tipo].titulo)} · ${esc(o.codigo)}`, "Mediciones",
       `<button class="boton boton-chico" type="button" id="med-excel" title="Descargar la planilla con estos datos">Excel</button>
       ${puede ? `<button class="boton boton-primario boton-chico" type="button" id="med-guardar">Guardar</button>` : ""}`)}
@@ -5812,25 +5818,32 @@ function ladoHtml(lado, d, r, puede) {
 const campoNum = (attr, v, puede, etq, conSigno = true) => `<label class="med-num"><span>${etq}</span><span class="med-num-caja">
   ${conSigno ? `<button type="button" class="signo" data-signo tabindex="-1" aria-label="Cambiar el signo de ${etq}" ${puede ? "" : "disabled"}>±</button>` : ""}
   <input inputmode="decimal" autocomplete="off" ${attr} value="${esc(v ?? "")}" ${puede ? "" : "disabled"} aria-label="${etq}"></span></label>`;
-function nivelesHtml(d, r, puede) {
-  const t = MD.tramo;
+// Se mide desde un lado a la vez (el teodolito en el anclaje 1, después el 2 y el 3): cada pestaña es un lado,
+// con todos los niveles. En medios parantes se elige con un toque, de −1 a +1 de a cuartos (+ = se corrió a la derecha).
+const CUARTOS = [[-1, "−1"], [-0.75, "−¾"], [-0.5, "−½"], [-0.25, "−¼"], [0, "0"], [0.25, "+¼"], [0.5, "+½"], [0.75, "+¾"], [1, "+1"]];
+function nivelesHtml(k, d, r, puede) {
+  const t = MD.tramo, parante = d.unidad === "parante";
   const costado = esquemaCostado(d.niveles.map((n) => ({ h: numeroCampo(n.altura), etq: `${numero(numeroCampo(n.altura), 1)} m` })), t, `nivel a ${d.niveles[t]?.altura} m`);
+  const hechos = d.niveles.filter((n) => numeroCampo(n.D[k]) != null).length;
   return `<div class="med-esquema"><img src="plantillas/mastil-esquema.png" alt="Planta del mástil: lados 1, 2 y 3, D1, D2 y D3 positivos en el sentido de las flechas" class="med-dibujo">${costado}</div>
     <div class="med-unidad" role="group" aria-label="Unidad de las lecturas">Lecturas en
-      <button type="button" data-unidad="cm" aria-pressed="${d.unidad !== "parante"}" ${puede ? "" : "disabled"}>cm</button>
-      <button type="button" data-unidad="parante" aria-pressed="${d.unidad === "parante"}" ${puede ? "" : "disabled"}>medios parantes${numeroCampo(d.medio_parante) ? ` (1 = ${numero(numeroCampo(d.medio_parante), 1)} cm)` : ""}</button></div>
-    ${d.unidad === "parante" && !numeroCampo(d.medio_parante) ? `<p class="nota med-alerta">Falta la medida del medio parante (en Datos) para pasar las lecturas a cm.</p>` : ""}
-    <p class="nota med-ayuda">En cada nivel, mirá con el teodolito el medio del parante desde los lados 1, 2 y 3 y anotá D1, D2 y D3 (positivo hacia donde marca el dibujo; con ± cambiás el signo). A es el ancho de la cara.</p>
+      <button type="button" data-unidad="parante" aria-pressed="${parante}" ${puede ? "" : "disabled"}>medios parantes${numeroCampo(d.medio_parante) ? ` (1 = ${numero(numeroCampo(d.medio_parante), 1)} cm)` : ""}</button>
+      <button type="button" data-unidad="cm" aria-pressed="${!parante}" ${puede ? "" : "disabled"}>cm</button></div>
+    ${parante && !numeroCampo(d.medio_parante) ? `<p class="nota med-alerta">Falta la medida del medio parante (en Datos) para pasar las lecturas a cm y calcular.</p>` : ""}
+    <p class="nota med-ayuda">Teodolito en el <b>anclaje ${k + 1}</b> (lado ${k + 1} del dibujo, da D${k + 1}): para cada nivel, mirá el medio del parante y marcá cuánto se corrió: <b>+ a la derecha</b>, − a la izquierda. Van ${hechos} de ${d.niveles.length}.</p>
     <div class="med-tramos">${d.niveles.map((n, i) => {
-      const f = r.filas[i];
-      return `<section class="med-tramo${i === t ? " actual" : ""}" data-tramo="${i}">
-        <h3>Nivel ${i + 1} <small>a ${numero(numeroCampo(n.altura), 1)} m · A ${n.A != null && n.A !== "" ? numero(numeroCampo(n.A), 0) + " cm" : "—"}</small></h3>
-        <div class="med-tres">${[0, 1, 2].map((k) => campoNum(`data-d="${i}:${k}"`, n.D[k], puede, `D${k + 1}${d.unidad === "parante" ? "" : " (cm)"}`)).join("")}</div>
-        <p class="med-desp" data-desp="${i}">${resNivel(f)}</p>
+      const v = numeroCampo(n.D[k]);
+      return `<section class="med-tramo med-nivel${i === t ? " actual" : ""}" data-tramo="${i}">
+        <h3>Nivel ${i + 1} <small>a ${numero(numeroCampo(n.altura), 1)} m</small>${v != null ? `<span class="med-valor">D${k + 1} = ${parante ? (CUARTOS.find((c) => c[0] === v)?.[1] ?? numero(v, 2)) : numero(v, 1) + " cm"}</span>` : ""}</h3>
+        ${parante ? `<div class="cuartos" role="group" aria-label="D${k + 1} del nivel ${i + 1}">${CUARTOS.map(([c, txt]) =>
+            `<button type="button" data-q="${i}:${k}:${c}" aria-pressed="${v === c}" ${puede ? "" : "disabled"} class="${c === 0 ? "cero" : c > 0 ? "mas" : "menos"}">${txt}</button>`).join("")}</div>`
+          : `<div class="med-uno">${campoNum(`data-d="${i}:${k}"`, n.D[k], puede, `D${k + 1} (cm)`)}</div>`}
+        <p class="med-desp" data-desp="${i}">${resNivel(r.filas[i])}</p>
       </section>`;
-    }).join("")}</div>`;
+    }).join("")}</div>
+    ${k < 2 ? `<button type="button" class="boton med-seguir" data-pest="lado${k + 1}">Seguir con el anclaje ${k + 2} ›</button>` : `<button type="button" class="boton med-seguir" data-pest="resultado">Ver el resultado ›</button>`}`;
 }
-const resNivel = (f) => (f.falta ? "Desplome: —" : `d ${numero(f.d, 1)} cm · giro <b>${f.a != null ? numero(f.a, 2) + "°" : "—"}</b> · x ${numero(f.x, 1)} · y ${numero(f.y, 1)} · desplome <b>${numero(f.r, 1)} cm</b>`);
+const resNivel = (f) => (f.falta ? "Desplome: — (faltan lados)" : `d ${numero(f.d, 1)} cm · giro <b>${f.a != null ? numero(f.a, 2) + "°" : "—"}</b> · x ${numero(f.x, 1)} · y ${numero(f.y, 1)} · desplome <b>${numero(f.r, 1)} cm</b>`);
 function resultadoMastilHtml(r) {
   const grande = r.cumple == null ? `<div class="med-veredicto">Faltan lecturas</div>`
     : `<div class="med-veredicto ${r.cumple ? "si" : "no"}">${r.cumple ? "CUMPLE" : "NO CUMPLE"}<small>${r.cumple ? "Giro y desplome dentro de las tolerancias de la planilla" : esc(r.problemas.join(" · "))}</small></div>`;
@@ -5905,7 +5918,7 @@ function datosHtml(m, puede) {
   return `<div class="form med-datos">
     <label>Fecha<input type="date" data-fecha value="${esc(String(m.fecha || "").slice(0, 10))}" ${dis}></label>
     ${perfil}${gen}${sitio}
-    ${puede && !m.nueva ? `<button class="boton boton-peligro" type="button" id="med-borrar">Borrar esta medición</button>` : ""}
+    ${puede ? `<button class="boton boton-peligro" type="button" id="med-borrar">${m.nueva ? "Descartar esta medición" : "Borrar esta medición"}</button>` : ""}
   </div>`;
 }
 function tablaFilas(clave, filas, cols, dis, max) {
@@ -5973,7 +5986,7 @@ function refrescarCalculo() {
     if (m.tipo === "verticalidad_monopolo" && (k === "lado1" || k === "lado2")) {
       const c = k === "lado1" ? "x" : "y", v = r.filas[i][c];
       if (i > 0) p.innerHTML = v == null ? "Desplazamiento: —" : `Desplazamiento ${c}: <b>${numero(v, 1)} cm</b>`;
-    } else if (m.tipo === "verticalidad_mastil" && k === "niveles") p.innerHTML = resNivel(r.filas[i]);
+    } else if (m.tipo === "verticalidad_mastil" && k.startsWith("lado")) p.innerHTML = resNivel(r.filas[i]);
     else if (m.tipo === "tension_riendas" && k.startsWith("anclaje")) p.innerHTML = resRienda(r.anclajes[Number(k.slice(7))].riendas[i], r.tol);
   });
 }
@@ -6020,6 +6033,17 @@ function enlazarMedicion(p, m) {
     inp.focus();
   }));
   p.querySelectorAll(".med-tramo").forEach((s) => s.addEventListener("click", () => marcarTramo(Number(s.dataset.tramo))));
+  p.querySelectorAll("[data-q]").forEach((b) => (b.onclick = (ev) => {
+    ev.stopPropagation();
+    const [i, k, v] = b.dataset.q.split(":");
+    d.niveles[Number(i)].D[Number(k)] = v;
+    m.cambiado = true; guardarBorrador();
+    MD.tramo = Math.min(Number(i) + 1, d.niveles.length - 1);
+    const y = document.querySelector("#med-cuerpo").scrollTop;
+    pintarMedicion();
+    const c = document.querySelector("#med-cuerpo"); c.scrollTop = y;
+    c.querySelector(`.med-tramo[data-tramo="${MD.tramo}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }));
   p.querySelectorAll("[data-unidad]").forEach((b) => (b.onclick = () => { d.unidad = b.dataset.unidad; m.cambiado = true; guardarBorrador(); pintarMedicion(); }));
   p.querySelectorAll("[data-dato]").forEach((inp) => (inp.oninput = () => { d[inp.dataset.dato] = inp.value; cambio(); }));
   p.querySelector("[data-fecha]")?.addEventListener("input", (e) => { m.fecha = e.target.value; cambio(); });
@@ -6048,15 +6072,26 @@ function enlazarMedicion(p, m) {
     editarPerfil(perfilDesdeMedicion(m), () => editarMedicion(vuelta));
   });
   $("#med-borrar")?.addEventListener("click", async () => {
-    if (!confirm("¿Borrar esta medición? No se puede deshacer.")) return;
-    try {
-      if (m.creado || !m.borrador) await S.api.borrarMedicion(m.id).catch((e) => { if (!/no se encontr/i.test(e.message)) throw e; });
-      quitarBorrador(m.id);
-      aviso("Medición borrada");
-      MD.m = null;
-      abrirMediciones(MD.o, m.tipo);
-    } catch (e) { aviso(sinRed(e) ? "Sin conexión: para borrar una medición hace falta señal." : e.message, true); }
+    if (!(await borrarMedicion(m))) return;
+    MD.m = null;
+    abrirMediciones(MD.o, m.tipo);
   });
+}
+
+// Borra una medición: de la base (si ya se había subido), de los pendientes sin señal y del borrador del dispositivo
+async function borrarMedicion(m) {
+  if (!m || !confirm(`¿Borrar la medición del ${fecha(String(m.fecha).slice(0, 10))}? No se puede deshacer.`)) return false;
+  try {
+    if (m.autor) await S.api.borrarMedicion(m.id); // ya estaba en la base
+    S.pend = S.pend.filter((x) => !(x.op === "guardarMedicion" && x.args[0].id === m.id));
+    guardarPend();
+    quitarBorrador(m.id);
+    aviso("Medición borrada");
+    return true;
+  } catch (e) {
+    aviso(sinRed(e) ? "Sin conexión: para borrar una medición que ya se subió hace falta señal." : e.message, true, 8000);
+    return false;
+  }
 }
 
 async function guardarMedicionActual() {
