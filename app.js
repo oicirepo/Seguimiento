@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-10";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-11";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -779,6 +779,7 @@ function mostrarApp() {
   };
   $("#boton-usuarios").onclick = abrirAdmin;
   $("#boton-historial").onclick = () => abrirHistorial();
+  $("#boton-perfiles").onclick = () => abrirPerfiles(null, cerrarMedicion);
   $("#salir").onclick = salirCuenta;
   $("#estado-datos").onclick = () => { if (S.estadoRed === "sinred") actualizar(); };
   $("#actualizar-ahora").onclick = async () => { await actualizar(); pintarAjustes(); };
