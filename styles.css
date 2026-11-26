@@ -653,9 +653,7 @@ body.con-medicion { overflow: hidden; }
 .med-geo .quitar { border: 0; background: none; color: var(--tinta-suave); cursor: pointer; font-size: 14px; }
 .med-geo .quitar:disabled { opacity: .3; }
 .enlace { padding: 0; border: 0; background: none; color: var(--acento); font: inherit; text-decoration: underline; cursor: pointer; }
-.med-unidad { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 6px 0; font-size: 13px; color: var(--tinta-suave); }
-.med-unidad button { padding: 6px 10px; border: 1px solid var(--linea); border-radius: 999px; background: none; color: var(--tinta-suave); font: 600 13px var(--texto); cursor: pointer; }
-.med-unidad button[aria-pressed="true"] { border-color: var(--acento-fuerte); background: var(--acento-claro); color: var(--tinta); }
+.med-unidad { margin: 6px 0; font-size: 13px; color: var(--tinta-suave); }
 .med-alerta { color: #F2C14E; }
 .med-datos .dos { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .med-datos input, .med-datos select, .med-datos textarea { min-width: 0; max-width: 100%; }

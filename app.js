@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-9";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-10";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5555,8 +5555,8 @@ function calcularVerticalidad(d) {
 // x = (D2−D3)/√3; y = (2·D1−D2−D3)/3; r = √(x²+y²) (desplome). Tolerancias de la planilla:
 // α ≤ 5° en total; entre dos puntos a 3 m, no más de 0,5° (se toma proporcional a la distancia);
 // desplome entre dos puntos ≤ 0,25 % de su separación vertical; y el desplome máximo admisible si se cargó.
-// lecturas en cm o en «medios parantes» (como la columna «completar en sitio» de la planilla)
-const factorMastil = (d) => (d.unidad === "parante" ? numeroCampo(d.medio_parante) || null : 1);
+// lecturas siempre en «medios parantes», de a cuartos (columna «completar en sitio» de la planilla)
+const factorMastil = (d) => numeroCampo(d.medio_parante) || null;
 function calcularMastil(d) {
   const fac = factorMastil(d);
   const filas = d.niveles.map((n) => {
@@ -5845,22 +5845,19 @@ const campoNum = (attr, v, puede, etq, conSigno = true) => `<label class="med-nu
 // con todos los niveles. En medios parantes se elige con un toque, de −1 a +1 de a cuartos (+ = se corrió a la derecha).
 const CUARTOS = [[-1, "−1"], [-0.75, "−¾"], [-0.5, "−½"], [-0.25, "−¼"], [0, "0"], [0.25, "+¼"], [0.5, "+½"], [0.75, "+¾"], [1, "+1"]];
 function nivelesHtml(k, d, r, puede) {
-  const t = MD.tramo, parante = d.unidad === "parante";
+  const t = MD.tramo;
   const costado = esquemaCostado(d.niveles.map((n) => ({ h: numeroCampo(n.altura), etq: `${numero(numeroCampo(n.altura), 1)} m` })), t, `nivel a ${d.niveles[t]?.altura} m`);
   const hechos = d.niveles.filter((n) => numeroCampo(n.D[k]) != null).length;
   return `<div class="med-esquema"><img src="plantillas/mastil-esquema.png" alt="Planta del mástil: lados 1, 2 y 3, D1, D2 y D3 positivos en el sentido de las flechas" class="med-dibujo">${costado}</div>
-    <div class="med-unidad" role="group" aria-label="Unidad de las lecturas">Lecturas en
-      <button type="button" data-unidad="parante" aria-pressed="${parante}" ${puede ? "" : "disabled"}>medios parantes${numeroCampo(d.medio_parante) ? ` (1 = ${numero(numeroCampo(d.medio_parante), 1)} cm)` : ""}</button>
-      <button type="button" data-unidad="cm" aria-pressed="${!parante}" ${puede ? "" : "disabled"}>cm</button></div>
-    ${parante && !numeroCampo(d.medio_parante) ? `<p class="nota med-alerta">Falta la medida del medio parante (en Datos) para pasar las lecturas a cm y calcular.</p>` : ""}
+    ${numeroCampo(d.medio_parante) ? `<p class="nota med-unidad">Lecturas en medios parantes (1 = ${numero(numeroCampo(d.medio_parante), 1)} cm).</p>` : ""}
+    ${!numeroCampo(d.medio_parante) ? `<p class="nota med-alerta">Falta la medida del medio parante (en Datos) para pasar las lecturas a cm y calcular.</p>` : ""}
     <p class="nota med-ayuda">Teodolito en el <b>anclaje ${k + 1}</b> (lado ${k + 1} del dibujo, da D${k + 1}): para cada nivel, mirá el medio del parante y marcá cuánto se corrió: <b>+ a la derecha</b>, − a la izquierda. Van ${hechos} de ${d.niveles.length}.</p>
     <div class="med-tramos">${d.niveles.map((n, i) => {
       const v = numeroCampo(n.D[k]);
       return `<section class="med-tramo med-nivel${i === t ? " actual" : ""}" data-tramo="${i}">
-        <h3>Nivel ${i + 1} <small>a ${numero(numeroCampo(n.altura), 1)} m</small>${v != null ? `<span class="med-valor">D${k + 1} = ${parante ? (CUARTOS.find((c) => c[0] === v)?.[1] ?? numero(v, 2)) : numero(v, 1) + " cm"}</span>` : ""}</h3>
-        ${parante ? `<div class="cuartos" role="group" aria-label="D${k + 1} del nivel ${i + 1}">${CUARTOS.map(([c, txt]) =>
-            `<button type="button" data-q="${i}:${k}:${c}" aria-pressed="${v === c}" ${puede ? "" : "disabled"} class="${c === 0 ? "cero" : c > 0 ? "mas" : "menos"}">${txt}</button>`).join("")}</div>`
-          : `<div class="med-uno">${campoNum(`data-d="${i}:${k}"`, n.D[k], puede, `D${k + 1} (cm)`)}</div>`}
+        <h3>Nivel ${i + 1} <small>a ${numero(numeroCampo(n.altura), 1)} m</small>${v != null ? `<span class="med-valor">D${k + 1} = ${CUARTOS.find((c) => c[0] === v)?.[1] ?? numero(v, 2)}</span>` : ""}</h3>
+        <div class="cuartos" role="group" aria-label="D${k + 1} del nivel ${i + 1}">${CUARTOS.map(([c, txt]) =>
+            `<button type="button" data-q="${i}:${k}:${c}" aria-pressed="${v === c}" ${puede ? "" : "disabled"} class="${c === 0 ? "cero" : c > 0 ? "mas" : "menos"}">${txt}</button>`).join("")}</div>
         <p class="med-desp" data-desp="${i}">${resNivel(r.filas[i])}</p>
       </section>`;
     }).join("")}</div>
@@ -6067,7 +6064,6 @@ function enlazarMedicion(p, m) {
     const c = document.querySelector("#med-cuerpo"); c.scrollTop = y;
     c.querySelector(`.med-tramo[data-tramo="${MD.tramo}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }));
-  p.querySelectorAll("[data-unidad]").forEach((b) => (b.onclick = () => { d.unidad = b.dataset.unidad; m.cambiado = true; guardarBorrador(); pintarMedicion(); }));
   p.querySelectorAll("[data-dato]").forEach((inp) => (inp.oninput = () => { d[inp.dataset.dato] = inp.value; cambio(); }));
   p.querySelector("[data-fecha]")?.addEventListener("input", (e) => { m.fecha = e.target.value; cambio(); });
   p.querySelectorAll("[data-fila]").forEach((inp) => (inp.oninput = () => {
@@ -6392,7 +6388,7 @@ async function exportarMastil(m, o) {
       // en medios parantes: lo leído va en «completar en sitio» (M–O) y en cm en D1–D3 (C–E)
       const fac = factorMastil(dv), crudo = nv ? nv.D.map(numeroCampo) : [null, null, null];
       ["C", "D", "E"].forEach((col, k) => (v1 = ponerCelda(v1, col + f, crudo[k] != null && fac != null ? crudo[k] * fac : null)));
-      ["M", "N", "O"].forEach((col, k) => (v1 = ponerCelda(v1, col + f, dv.unidad === "parante" ? crudo[k] : null)));
+      ["M", "N", "O"].forEach((col, k) => (v1 = ponerCelda(v1, col + f, crudo[k])));
       const ok = c && !c.falta;
       v1 = ponerCelda(v1, "F" + f, ok ? c.d : nv ? 0 : null); v1 = ponerCelda(v1, "G" + f, ok ? c.e : nv ? 0 : null);
       v1 = ponerCelda(v1, "H" + f, ok ? c.a : nv ? 0 : null); v1 = ponerCelda(v1, "I" + f, ok ? c.x : nv ? 0 : null);
