@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-6";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-7";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5701,16 +5701,18 @@ async function abrirMediciones(o, tipo) {
   ul.innerHTML = (aviso_ ? `<li class="nota">${esc(aviso_)}</li>` : "") + (MD.lista.length ? MD.lista.map((m) => {
     const r = m.resultado || resumenMedicion(m, calcularMedicion(m));
     const est = r.cumple == null ? `<span class="med-chip">incompleta</span>` : r.cumple ? `<span class="med-chip si">Cumple</span>` : `<span class="med-chip no">No cumple</span>`;
-    return `<li class="med-fila"><button type="button" data-abrir="${esc(m.id)}">
+    return `<li><button type="button" data-abrir="${esc(m.id)}" ${editor() ? 'title="Mantené apretado (o clic derecho) para eliminarla"' : ""}>
         <span><b>${fecha(String(m.fecha).slice(0, 10))}</b> ${est}${m.borrador && !m.creado ? ` <span class="sin-subir">borrador</span>` : m.pendiente ? ` <span class="sin-subir">sin subir</span>` : ""}</span>
         <small>${esc(textoResumen(m, r))}${m.datos?.perfil_nombre ? ` · ${esc(m.datos.perfil_nombre)}` : ""}${m.autor ? ` · ${esc(m.autor)}` : ""}</small></button>
-        ${editor() ? `<button type="button" class="med-borrar" data-borrar="${esc(m.id)}" aria-label="Borrar la medición del ${fecha(String(m.fecha).slice(0, 10))}" title="Borrar">${ICONO.borrar}</button>` : ""}</li>`;
+</li>`;
   }).join("") : `<li class="nota">Todavía no hay mediciones de esta estructura.${editor() ? " Tocá «Nueva medición» para cargar la primera." : ""}</li>`);
   ul.querySelectorAll("[data-abrir]").forEach((b) => (b.onclick = () => editarMedicion(structuredClone(MD.lista.find((m) => m.id === b.dataset.abrir)))));
-  ul.querySelectorAll("[data-borrar]").forEach((b) => (b.onclick = async () => {
-    const m = MD.lista.find((x) => x.id === b.dataset.borrar);
+  // eliminar: manteniendo apretada la medición (o con clic derecho) aparece la opción
+  if (editor()) ul.querySelectorAll("[data-abrir]").forEach((b) => mantenerParaMenu(b, () => [["Eliminar medición", async () => {
+    const m = MD.lista.find((x) => x.id === b.dataset.abrir);
     if (await borrarMedicion(m)) abrirMediciones(o, tipo);
-  }));
+  }, true]]));
+
 }
 
 function pestanasDe(m) {
@@ -5918,7 +5920,7 @@ function datosHtml(m, puede) {
   return `<div class="form med-datos">
     <label>Fecha<input type="date" data-fecha value="${esc(String(m.fecha || "").slice(0, 10))}" ${dis}></label>
     ${perfil}${gen}${sitio}
-    ${puede ? `<button class="boton boton-peligro" type="button" id="med-borrar">${m.nueva ? "Descartar esta medición" : "Borrar esta medición"}</button>` : ""}
+    ${puede ? `<button class="boton boton-peligro" type="button" id="med-quitar">${m.nueva ? "Descartar esta medición" : "Borrar esta medición"}</button>` : ""}
   </div>`;
 }
 function tablaFilas(clave, filas, cols, dis, max) {
@@ -6071,11 +6073,41 @@ function enlazarMedicion(p, m) {
     const vuelta = structuredClone(m);
     editarPerfil(perfilDesdeMedicion(m), () => editarMedicion(vuelta));
   });
-  $("#med-borrar")?.addEventListener("click", async () => {
+  $("#med-quitar")?.addEventListener("click", async () => {
     if (!(await borrarMedicion(m))) return;
     MD.m = null;
     abrirMediciones(MD.o, m.tipo);
   });
+}
+
+// Menú chico que aparece al mantener apretado un elemento (unos 0,6 s sin moverlo) o con clic derecho.
+// El toque normal sigue haciendo lo de siempre.
+function mantenerParaMenu(el, opciones) {
+  let reloj = null, x0 = 0, y0 = 0, abierto = false;
+  const cancelar = () => { clearTimeout(reloj); reloj = null; };
+  const abrir = (x, y) => {
+    abierto = true;
+    navigator.vibrate?.(30);
+    document.querySelector(".menu-ctx")?.remove();
+    const m = document.createElement("div");
+    m.className = "menu-ctx"; m.setAttribute("role", "menu");
+    m.innerHTML = opciones().map(([t, , peligro], i) => `<button type="button" role="menuitem" data-i="${i}" class="${peligro ? "peligro" : ""}">${ICONO.borrar}${esc(t)}</button>`).join("");
+    document.body.append(m);
+    const r = m.getBoundingClientRect();
+    m.style.left = Math.max(8, Math.min(x - r.width / 2, innerWidth - r.width - 8)) + "px";
+    m.style.top = Math.max(8, Math.min(y - r.height - 12, innerHeight - r.height - 8)) + "px";
+    const cerrar = () => { m.remove(); document.removeEventListener("pointerdown", fuera, true); setTimeout(() => (abierto = false), 300); };
+    const fuera = (e) => { if (!m.contains(e.target)) cerrar(); };
+    setTimeout(() => document.addEventListener("pointerdown", fuera, true), 0);
+    m.querySelectorAll("[data-i]").forEach((b) => (b.onclick = () => { cerrar(); opciones()[Number(b.dataset.i)][1](); }));
+    m.querySelector("button")?.focus();
+  };
+  el.addEventListener("pointerdown", (e) => { x0 = e.clientX; y0 = e.clientY; cancelar(); reloj = setTimeout(() => { reloj = null; abrir(x0, y0); }, 600); });
+  el.addEventListener("pointermove", (e) => { if (Math.hypot(e.clientX - x0, e.clientY - y0) > 8) cancelar(); });
+  for (const t of ["pointerup", "pointercancel", "pointerleave"]) el.addEventListener(t, cancelar);
+  el.addEventListener("contextmenu", (e) => { e.preventDefault(); cancelar(); abrir(e.clientX, e.clientY); });
+  // el toque que termina de mantener apretado no abre la medición
+  el.addEventListener("click", (e) => { if (abierto) { e.stopImmediatePropagation(); e.preventDefault(); } }, true);
 }
 
 // Borra una medición: de la base (si ya se había subido), de los pendientes sin señal y del borrador del dispositivo
