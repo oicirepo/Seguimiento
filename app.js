@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-13";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-14";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -6359,7 +6359,7 @@ async function exportarVerticalidad(m, o) {
   serie("Monopolo!$O$20:$O$24", xs.slice(0, n)); serie("Monopolo!$O$30:$O$34", ys.slice(0, n));
   serie("Monopolo!$I$20:$I$24", alt); serie("Monopolo!$I$30:$I$34", alt);
   poner("xl/charts/chart1.xml", g);
-  const nombre = `verticalidad-${String(o.codigo || "monopolo").replace(/[^\w-]+/g, "")}-${String(m.fecha || hoy()).slice(0, 10)}.xlsx`;
+  const nombre = `verticalidad-monopolo-${String(o.codigo || "monopolo").replace(/[^\w-]+/g, "")}-${String(m.fecha || hoy()).slice(0, 10)}.xlsx`;
   descargarZip(XLSX, zip, nombre);
   return nombre;
 }
