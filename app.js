@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-15";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-16";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5416,6 +5416,11 @@ const MED_TIPO = {
   tension_riendas: { titulo: "Tensión de riendas", estructura: "mastil" },
 };
 // lugares que tiene cada planilla (si un perfil tiene más, el Excel muestra solo estos)
+// nombres sugeridos para los niveles del mástil (se puede escribir otro)
+const NOMBRES_NIVEL = ["Rienda", "Empalme", "Antirrotor", "Base"];
+// A (ancho de cara) es el mismo en todos los niveles: se carga una vez
+const campoA = (niveles, dis) => `<label>A, ancho de la cara (cm), igual para todos los niveles<input data-a-todos inputmode="decimal" value="${esc(niveles.find((n) => n.A !== "" && n.A != null)?.A ?? "")}" ${dis}></label>`;
+const COLS_NIVELES = [["nombre", "Nombre", "lista"], ["altura", "Altura (m)"]];
 const MAX_FILAS = { monopolo: 20, mastil: 30, riendas: 30 };   // mástil: la planilla se arma con las filas que haya
 const LADOS = ["lado1", "lado2"];
 const CLAVE_BORRADORES = "obras-oici-mediciones-v1" + (DEMO ? "-demo" : "");
@@ -5468,7 +5473,7 @@ function filasDePerfil(tipo, perfil, o) {
   }
   if (tipo === "verticalidad_mastil") return {
     medio_parante: d.medio_parante ?? "", desplome_admisible: d.desplome_admisible ?? "", unidad: "parante",
-    niveles: (d.niveles || []).map((n) => ({ altura: n.altura, A: n.A, D: ["", "", ""] })),
+    niveles: (d.niveles || []).map((n) => ({ nombre: n.nombre || "", altura: n.altura, A: n.A, D: ["", "", ""] })),
   };
   return {
     tolerancia: d.tolerancia ?? 30,
@@ -5856,7 +5861,7 @@ function nivelesHtml(k, d, r, puede) {
     <div class="med-tramos">${d.niveles.map((n, i) => {
       const v = numeroCampo(n.D[k]);
       return `<section class="med-tramo med-nivel${i === t ? " actual" : ""}" data-tramo="${i}">
-        <h3>Nivel ${i + 1} <small>a ${numero(numeroCampo(n.altura), 1)} m</small>${v != null ? `<span class="med-valor">D${k + 1} = ${CUARTOS.find((c) => c[0] === v)?.[1] ?? numero(v, 2)}</span>` : ""}</h3>
+        <h3>Nivel ${i + 1}${n.nombre ? ` <span class="med-chip">${esc(n.nombre)}</span>` : ""} <small>a ${numero(numeroCampo(n.altura), 1)} m</small>${v != null ? `<span class="med-valor">D${k + 1} = ${CUARTOS.find((c) => c[0] === v)?.[1] ?? numero(v, 2)}</span>` : ""}</h3>
         <div class="cuartos" role="group" aria-label="D${k + 1} del nivel ${i + 1}">${CUARTOS.map(([c, txt]) =>
             `<button type="button" data-q="${i}:${k}:${c}" aria-pressed="${v === c}" ${puede ? "" : "disabled"} class="${c === 0 ? "cero" : c > 0 ? "mas" : "menos"}">${txt}</button>`).join("")}</div>
         <p class="med-desp" data-desp="${i}">${resNivel(r.filas[i])}</p>
@@ -5930,8 +5935,8 @@ function datosHtml(m, puede) {
       ${campo("responsable", "Responsable")}${m.tipo === "tension_riendas" ? campo("viento", "Indicaciones: viento") : ""}`;
     sitio = m.tipo === "verticalidad_mastil"
       ? `<div class="dos">${campo("medio_parante", "Medida de medio parante (cm)", 'inputmode="decimal"')}${campo("desplome_admisible", "Desplome máx. admisible (cm)", 'inputmode="decimal"')}</div>
-        <h3>Niveles</h3><p class="nota">Altura de cada nivel y A, el ancho de la cara (completar en sitio). La planilla se arma con los niveles que cargues.</p>
-        ${tablaFilas("niveles", d.niveles, [["altura", "Altura (m)"], ["A", "A (cm)"]], dis)}`
+        <h3>Niveles</h3><p class="nota">Nombre (rienda, empalme, antirrotor, base u otro) y altura de cada nivel. La planilla se arma con los niveles que cargues.</p>
+        ${campoA(d.niveles, dis)}${tablaFilas("niveles", d.niveles, COLS_NIVELES, dis)}`
       : `${campo("tolerancia", "Tolerancia (± %)", 'inputmode="decimal"')}
         <h3>Riendas</h3><p class="nota">Las mismas en los tres anclajes. La planilla se arma con las riendas que cargues.</p>
         ${tablaFilas("riendas", d.anclajes[0].riendas, [["nombre", "Rienda", "text"], ["tipo", "Tipo", "text"], ["nominal", "Lectura de referencia"]], dis)}`;
@@ -5945,9 +5950,9 @@ function datosHtml(m, puede) {
 function tablaFilas(clave, filas, cols, dis, max) {
   const tope = max || MAX_FILAS[clave === "tramos" ? "monopolo" : clave === "niveles" ? "mastil" : "riendas"];
   return `<table class="med-geo" data-tabla="${clave}"><thead><tr>${cols.map(([, t]) => `<th>${t}</th>`).join("")}<th></th></tr></thead><tbody>
-    ${filas.map((f, i) => `<tr>${cols.map(([k, t, tipo]) => `<td><input ${tipo === "text" ? "" : 'inputmode="decimal"'} data-fila="${clave}:${i}:${k}" value="${esc(f[k] ?? "")}" ${dis} aria-label="${t} ${i + 1}"></td>`).join("")}
+    ${filas.map((f, i) => `<tr>${cols.map(([k, t, tipo]) => `<td><input ${tipo === "lista" ? 'list="lista-niveles" autocomplete="off"' : tipo === "text" ? "" : 'inputmode="decimal"'} data-fila="${clave}:${i}:${k}" value="${esc(f[k] ?? "")}" ${dis} aria-label="${t} ${i + 1}"></td>`).join("")}
       <td>${dis ? "" : `<button type="button" class="quitar" data-quitar="${clave}:${i}" aria-label="Quitar la fila ${i + 1}" ${filas.length <= 1 ? "disabled" : ""}>✕</button>`}</td></tr>`).join("")}
-  </tbody></table>${dis ? "" : `<button type="button" class="boton boton-chico" data-agregar="${clave}" ${filas.length >= tope ? "disabled" : ""}>+ Agregar fila</button>${filas.length >= tope ? ` <span class="nota">(la planilla no tiene más lugar)</span>` : ""}`}`;
+  </tbody></table>${cols.some((c) => c[2] === "lista") ? `<datalist id="lista-niveles">${NOMBRES_NIVEL.map((x) => `<option value="${x}">`).join("")}</datalist>` : ""}${dis ? "" : `<button type="button" class="boton boton-chico" data-agregar="${clave}" ${filas.length >= tope ? "disabled" : ""}>+ Agregar fila</button>${filas.length >= tope ? ` <span class="nota">(la planilla no tiene más lugar)</span>` : ""}`}`;
 }
 // agregar o quitar filas en la medición (tramos, niveles o riendas) manteniendo las lecturas a la par
 function cambiarFilas(m, clave, accion, i) {
@@ -5956,7 +5961,7 @@ function cambiarFilas(m, clave, accion, i) {
     if (accion === "agregar") { d.tramos.push({ nombre: String(d.tramos.length + 1), ancho: "", altura: "" }); LADOS.forEach((l) => d[l].push({ iz: ["", "", ""], de: ["", "", ""] })); }
     else { d.tramos.splice(i, 1); LADOS.forEach((l) => d[l].splice(i, 1)); }
   } else if (clave === "niveles") {
-    if (accion === "agregar") d.niveles.push({ altura: "", A: d.niveles.at(-1)?.A ?? "", D: ["", "", ""] }); else d.niveles.splice(i, 1);
+    if (accion === "agregar") d.niveles.push({ nombre: d.niveles.at(-1)?.nombre || "", altura: "", A: d.niveles.find((n) => n.A !== "" && n.A != null)?.A ?? "", D: ["", "", ""] }); else d.niveles.splice(i, 1);
   } else {
     d.anclajes.forEach((a) => { if (accion === "agregar") a.riendas.push({ nombre: String(a.riendas.length + 1), tipo: a.riendas.at(-1)?.tipo || "", nominal: a.riendas.at(-1)?.nominal ?? "", L: ["", "", ""] }); else a.riendas.splice(i, 1); });
   }
@@ -6067,6 +6072,7 @@ function enlazarMedicion(p, m) {
   }));
   p.querySelectorAll("[data-dato]").forEach((inp) => (inp.oninput = () => { d[inp.dataset.dato] = inp.value; cambio(); }));
   p.querySelector("[data-fecha]")?.addEventListener("input", (e) => { m.fecha = e.target.value; cambio(); });
+  p.querySelector("[data-a-todos]")?.addEventListener("input", (e) => { d.niveles.forEach((n) => (n.A = e.target.value)); cambio(); });
   p.querySelectorAll("[data-fila]").forEach((inp) => (inp.oninput = () => {
     const [clave, i, k] = inp.dataset.fila.split(":");
     if (clave === "riendas") d.anclajes.forEach((a) => (a.riendas[Number(i)][k] = inp.value));
@@ -6182,7 +6188,7 @@ async function abrirPerfiles(tipoEst, volver) {
 const perfilVacio = (tipo) => ({ id: nuevoId(), nombre: "", tipo, nuevo: true, datos: tipo === "monopolo"
   ? { fabricante: "", altura_m: "", tramos: ["1", "2", "3", "4", "Tope"].map((nombre) => ({ nombre, ancho: "", altura: "" })) }
   : { fabricante: "", altura_m: "", medio_parante: "", desplome_admisible: "", tolerancia: 30, anclajes: ["A", "B", "C"],
-      niveles: [{ altura: "", A: 120 }], riendas: [{ nombre: "1", tipo: "", nominal: "" }] } });
+      niveles: [{ nombre: "", altura: "", A: 120 }], riendas: [{ nombre: "1", tipo: "", nominal: "" }] } });
 function perfilDesdeMedicion(m) {
   const d = m.datos, p = perfilVacio(MED_TIPO[m.tipo].estructura);
   const base = MD.perfiles?.find((x) => x.id === d.perfil_id);
@@ -6190,7 +6196,7 @@ function perfilDesdeMedicion(m) {
   p.nombre = base ? `${base.nombre} (copia)` : "";
   p.datos.fabricante = d.fabricante || p.datos.fabricante;
   if (m.tipo === "verticalidad_monopolo") { p.datos.tramos = d.tramos.map(({ nombre, ancho, altura }) => ({ nombre, ancho, altura })); p.datos.altura_m = numeroCampo(d.altura) ? numeroCampo(d.altura) / 100 : ""; }
-  if (m.tipo === "verticalidad_mastil") Object.assign(p.datos, { niveles: d.niveles.map(({ altura, A }) => ({ altura, A })), medio_parante: d.medio_parante, desplome_admisible: d.desplome_admisible });
+  if (m.tipo === "verticalidad_mastil") Object.assign(p.datos, { niveles: d.niveles.map(({ nombre, altura, A }) => ({ nombre: nombre || "", altura, A })), medio_parante: d.medio_parante, desplome_admisible: d.desplome_admisible });
   if (m.tipo === "tension_riendas") Object.assign(p.datos, { riendas: d.anclajes[0].riendas.map(({ nombre, tipo, nominal }) => ({ nombre, tipo, nominal })), tolerancia: d.tolerancia, anclajes: d.anclajes.map((a) => a.nombre) });
   return p;
 }
@@ -6206,7 +6212,7 @@ function editarPerfil(pf, volver) {
       ${pf.tipo === "monopolo"
         ? `<h3>Tramos</h3>${tablaFilas("tramos", d.tramos, [["nombre", "Tramo", "text"], ["ancho", "Ancho (cm)"], ["altura", "Altura (cm)"]], dis)}`
         : `<div class="dos">${campo("medio_parante", "Medio parante (cm)", 'inputmode="decimal"')}${campo("desplome_admisible", "Desplome admisible (cm)", 'inputmode="decimal"')}</div>
-          <h3>Niveles de verticalidad</h3>${tablaFilas("niveles", d.niveles, [["altura", "Altura (m)"], ["A", "A (cm)"]], dis)}
+          <h3>Niveles de verticalidad</h3>${campoA(d.niveles, dis)}${tablaFilas("niveles", d.niveles, COLS_NIVELES, dis)}
           <h3>Riendas (iguales en cada anclaje)</h3>
           <div class="dos">${campo("tolerancia", "Tolerancia (± %)", 'inputmode="decimal"')}<label>Anclajes<input data-pd-anclajes value="${esc((d.anclajes || ["A", "B", "C"]).join(", "))}" ${dis}></label></div>
           ${tablaFilas("riendas", d.riendas, [["nombre", "Rienda", "text"], ["tipo", "Tipo", "text"], ["nominal", "Lectura de referencia"]], dis)}`}
@@ -6218,10 +6224,11 @@ function editarPerfil(pf, volver) {
   p.querySelectorAll("[data-pd]").forEach((i) => (i.oninput = () => (d[i.dataset.pd] = i.value)));
   p.querySelector("[data-pd-anclajes]")?.addEventListener("input", (e) => (d.anclajes = e.target.value.split(/[,;\s]+/).filter(Boolean).slice(0, 3)));
   $("#pf-nombre")?.addEventListener("input", (e) => (pf.nombre = e.target.value));
+  p.querySelector("[data-a-todos]")?.addEventListener("input", (e) => d.niveles.forEach((n) => (n.A = e.target.value)));
   p.querySelectorAll("[data-fila]").forEach((i) => (i.oninput = () => { const [c, n, k] = i.dataset.fila.split(":"); d[c][Number(n)][k] = i.value; }));
   p.querySelectorAll("[data-agregar]").forEach((b) => (b.onclick = () => {
     const c = b.dataset.agregar, ult = d[c].at(-1) || {};
-    d[c].push(c === "tramos" ? { nombre: String(d[c].length + 1), ancho: "", altura: "" } : c === "niveles" ? { altura: "", A: ult.A ?? "" } : { nombre: String(d[c].length + 1), tipo: ult.tipo || "", nominal: ult.nominal ?? "" });
+    d[c].push(c === "tramos" ? { nombre: String(d[c].length + 1), ancho: "", altura: "" } : c === "niveles" ? { nombre: ult.nombre || "", altura: "", A: d.niveles.find((n) => n.A !== "" && n.A != null)?.A ?? "" } : { nombre: String(d[c].length + 1), tipo: ult.tipo || "", nominal: ult.nominal ?? "" });
     editarPerfil(pf, volver);
     enfocarFilaNueva(p, c);
   }));

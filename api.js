@@ -234,7 +234,7 @@ export const PERFILES_BASE = [
       { nombre: "3", ancho: 97.3, altura: 1834 }, { nombre: "4", ancho: 75.5, altura: 2872 }, { nombre: "Tope", ancho: 50.6, altura: 4000 }] } },
   { id: "6c0d5d2e-0002-4a3e-9a51-000000000100", nombre: "Mástil Mingyuan/Ciemsa-Prosecco 100 m", tipo: "mastil",
     datos: { fabricante: "Mingyuan/Ciemsa-Prosecco", altura_m: 100, medio_parante: "", desplome_admisible: "",
-      niveles: [1.9, 14.5, 28.9, 41.5, 54.7, 69.1, 84.7, 96.7, 100].map((altura) => ({ altura, A: 120 })),
+      niveles: [[1.9, "Base"], [14.5, "Rienda"], [28.9, "Rienda"], [41.5, "Rienda"], [54.7, "Rienda"], [69.1, "Rienda"], [84.7, "Antirrotor"], [96.7, "Antirrotor"], [100, ""]].map(([altura, nombre]) => ({ nombre, altura, A: 120 })),
       tolerancia: 30, anclajes: ["A", "B", "C"],
       // tensión inicial del plano (kgf): 13 mm 1200 · 16 mm 1900 · 20 mm 2900 (sql/parte27)
       riendas: [["1", "1/2 19h", 1200], ["2", "1/2 19h", 1200], ["3", "1/2 19h", 1200], ["4", "1/2 19h", 1200], ["5", "5/8 19h", 1900],
@@ -242,7 +242,7 @@ export const PERFILES_BASE = [
         .map(([nombre, tipo, nominal]) => ({ nombre, tipo, nominal })) } },
   { id: "6c0d5d2e-0003-4a3e-9a51-000000000060", nombre: "Mástil Mingyuan/Ciemsa-Prosecco 60 m", tipo: "mastil",
     datos: { fabricante: "Mingyuan/Ciemsa-Prosecco", altura_m: 60, medio_parante: "", desplome_admisible: "",
-      niveles: [1.9, 14.1, 29.1, 43.5, 56.7, 60].map((altura) => ({ altura, A: 120 })),
+      niveles: [[1.9, "Base"], [14.1, "Rienda"], [29.1, "Rienda"], [43.5, "Rienda"], [56.7, "Antirrotor"], [60, ""]].map(([altura, nombre]) => ({ nombre, altura, A: 120 })),
       tolerancia: 30, anclajes: ["A", "B", "C"],
       riendas: [["1", "1/2 19h", 1200], ["2", "1/2 19h", 1200], ["3", "5/8 19h", 1900], ["4d", "3/4 19h", 2900], ["4i", "3/4 19h", 2900]]
         .map(([nombre, tipo, nominal]) => ({ nombre, tipo, nominal })) } },
