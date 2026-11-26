@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-14";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-15";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5416,7 +5416,7 @@ const MED_TIPO = {
   tension_riendas: { titulo: "Tensión de riendas", estructura: "mastil" },
 };
 // lugares que tiene cada planilla (si un perfil tiene más, el Excel muestra solo estos)
-const MAX_FILAS = { monopolo: 5, mastil: 30, riendas: 30 };   // mástil: la planilla se arma con las filas que haya
+const MAX_FILAS = { monopolo: 20, mastil: 30, riendas: 30 };   // mástil: la planilla se arma con las filas que haya
 const LADOS = ["lado1", "lado2"];
 const CLAVE_BORRADORES = "obras-oici-mediciones-v1" + (DEMO ? "-demo" : "");
 const CLAVE_PERFILES = "obras-oici-perfiles-v1" + (DEMO ? "-demo" : "");
@@ -5922,7 +5922,7 @@ function datosHtml(m, puede) {
       ${campo("altura", "Altura total (cm)", 'inputmode="decimal"')}${campo("instrumento", "Instrumento y fecha de calibración")}
       <label>Observaciones<textarea data-dato="observaciones" rows="2" ${dis}>${esc(d.observaciones || "")}</textarea></label>
       ${campo("licitacion", "Licitación de la inspección")}${campo("empresa", "Empresa responsable")}${campo("representante", "Representante técnico")}${campo("firma", "Firma y n° de Caja Profesional")}`;
-    sitio = `<h3>Tramos del monopolo</h3><p class="nota">Ancho del fuste y altura de cada punto donde se lee. La planilla tiene lugar para ${MAX_FILAS.monopolo}.</p>
+    sitio = `<h3>Tramos del monopolo</h3><p class="nota">Ancho del fuste y altura de cada punto donde se lee. La planilla se arma con los tramos que cargues.</p>
       ${tablaFilas("tramos", d.tramos, [["nombre", "Tramo", "text"], ["ancho", "Ancho (cm)"], ["altura", "Altura (cm)"]], dis)}`;
   } else {
     gen = `<div class="dos">${campo("estacion", "Estación")}${campo("altura_txt", "Altura")}</div>${campo("fabricante", "Fabricante")}
@@ -6303,61 +6303,80 @@ async function exportarMedicion(m, o, boton) {
     if (boton) { boton.disabled = false; boton.textContent = original; }
   }
 }
+// Monopolo: la hoja se arma con los tramos que tenga la medición (la original trae 5). Los bloques fijos de la
+// planilla (títulos, notas, gráfico) se copian y se corren; las filas de datos, fórmulas y el gráfico se ajustan.
 async function exportarVerticalidad(m, o) {
   const { XLSX, zip, leer, poner } = await abrirPlantilla("plantillas/verticalidad-monopolo.xlsx");
-  const d = m.datos, r = calcularVerticalidad(d);
+  const d = m.datos, N = d.tramos.length, dz = N - 5;
+  if (N < 2) throw new Error("hacen falta al menos 2 tramos");
   let h = leer("xl/worksheets/sheet1.xml");
   const textos = { D3: m.fecha ? fecha(String(m.fecha).slice(0, 10)) : "", D4: d.radiobase, D5: d.departamento, F8: d.instrumento, E9: d.observaciones,
     E11: d.licitacion, E12: d.empresa, E13: d.representante, E14: d.firma };
   for (const [ref, v] of Object.entries(textos)) h = ponerCelda(h, ref, v || null);
-  h = ponerCelda(h, "B7", numeroCampo(d.altura));
-  const filaDe = { lado1: 20, lado2: 30 }, n = MAX_FILAS.monopolo;
-  const tramos = d.tramos.slice(0, n);
-  for (const lado of LADOS) for (let i = 0; i < n; i++) {
-    const f = filaDe[lado] + i, t = tramos[i], l = d[lado][i];
-    ["B", "C", "D"].forEach((c, k) => (h = ponerCelda(h, c + f, l ? numeroCampo(l.iz[k]) : null)));
-    ["E", "F", "G"].forEach((c, k) => (h = ponerCelda(h, c + f, l ? numeroCampo(l.de[k]) : null)));
-    h = ponerCelda(h, "H" + f, t ? numeroCampo(t.ancho) : null);
-    h = ponerCelda(h, "I" + f, t ? numeroCampo(t.altura) : null);
-    if (t) h = ponerCelda(h, "A" + f, /^\d+$/.test(t.nombre) ? Number(t.nombre) : t.nombre);
-  }
-  const xs = r.filas.map((x) => x.x), ys = r.filas.map((x) => x.y);
-  for (let i = 0; i < n; i++) {
-    h = ponerCelda(h, "O" + (20 + i), xs[i] ?? null); h = ponerCelda(h, "O" + (30 + i), ys[i] ?? null);
-    h = ponerCelda(h, "C" + (40 + i), xs[i] ?? null); h = ponerCelda(h, "D" + (40 + i), ys[i] ?? null);
-    h = ponerCelda(h, "E" + (40 + i), r.filas[i]?.r ?? null);
-  }
-  h = ponerCelda(h, "I41", r.tol);
-  for (const lado of LADOS) {
-    const f0 = filaDe[lado], k = d[lado].map((l) => aDecimal(l.iz)), l = d[lado].map((x) => aDecimal(x.de));
-    const med = k.map((v, i) => (v != null && l[i] != null ? (v + l[i]) / 2 : null));
-    for (let i = 0; i < n; i++) {
-      h = ponerCelda(h, "K" + (f0 + i), k[i] ?? null); h = ponerCelda(h, "L" + (f0 + i), l[i] ?? null);
-      h = ponerCelda(h, "M" + (f0 + i), med[i] ?? null);
-      if (i > 0) h = ponerCelda(h, "N" + (f0 + i), med[i] != null && med[0] != null ? med[i] - med[0] : null);
-    }
-  }
-  const alt = tramos.map((t) => numeroCampo(t.altura));
-  const cols = ["F", "G", "H", "I", "J"];
-  for (let j = 0; j < n; j++) {
-    if (j > 0) h = ponerCelda(h, cols[j] + 48, alt[j] ?? null);
-    h = ponerCelda(h, cols[j] + 49, ys[j] ?? null); h = ponerCelda(h, cols[j] + 50, xs[j] ?? null);
-    h = ponerCelda(h, "B" + (52 + j), alt[j] ?? null); h = ponerCelda(h, "C" + (52 + j), xs[j] ?? null); h = ponerCelda(h, "D" + (52 + j), ys[j] ?? null);
-  }
-  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-    if (i === j) continue;
-    const hj = j === 0 ? 0 : alt[j];
-    const ok = [xs[i], ys[i], xs[j], ys[j], alt[i], hj].every((v) => v != null) && alt[i] !== hj;
-    h = ponerCelda(h, cols[j] + (52 + i), ok ? Math.abs(Math.hypot(xs[i] - xs[j], ys[i] - ys[j]) / (alt[i] - hj)) : null);
-  }
-  poner("xl/worksheets/sheet1.xml", sinErroresViejos(h));
-  let g = leer("xl/charts/chart1.xml");
-  const serie = (ref, vals) => {
-    g = g.replace(new RegExp(`(<c:f>${ref.replace(/\$/g, "\\$")}</c:f><c:numCache>[\\s\\S]*?<c:ptCount val="\\d+"\\s*/>)([\\s\\S]*?)(</c:numCache>)`),
-      (t, a, b, c) => a + vals.map((v, i) => (v == null ? "" : `<c:pt idx="${i}"><c:v>${v}</c:v></c:pt>`)).join("") + c);
+  const altTotal = numeroCampo(d.altura);
+  h = ponerCelda(h, "B7", altTotal);
+  const orig = new Map([...h.matchAll(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g)].map((x) => [+x[1], x[0]]));
+  const copiar = (desde, hasta, corr) => { let t = ""; for (let n = desde; n <= hasta; n++) if (orig.has(n)) t += orig.get(n).replace(/<row r="(\d+)"/, `<row r="${n + corr}"`).replace(/<c r="([A-Z]+)(\d+)"/g, (x, c, k) => `<c r="${c}${+k + corr}"`); return t; };
+  // posiciones (la original, con 5 tramos: lado 1 en 20, lado 2 en 30, desplazamientos en 40, verificación en 48–56)
+  const f1 = 20, f2 = 30 + dz, fd = 40 + 2 * dz, fh = 48 + 3 * dz, fm = 52 + 3 * dz;
+  const tr = d.tramos.map((t) => ({ nombre: /^\d+$/.test(String(t.nombre).trim()) ? Number(t.nombre) : t.nombre, ancho: numeroCampo(t.ancho), alt: numeroCampo(t.altura) }));
+  const rad = (g) => (g * Math.PI) / 180;
+  // un lado: igual que la planilla (las casillas vacías cuentan 0)
+  const lado = (L, f0) => {
+    const base = L[0] ? ((aDecimal(L[0].iz) ?? 0) + (aDecimal(L[0].de) ?? 0)) / 2 : 0;
+    return tr.map((t, i) => {
+      const iz = L[i]?.iz || ["", "", ""], de = L[i]?.de || ["", "", ""], k = aDecimal(iz) ?? 0, l = aDecimal(de) ?? 0, mm = (k + l) / 2, n = i ? mm - base : 0;
+      const o = i ? (t.ancho ?? 0) * Math.sin(rad(n)) / Math.sin(rad(l - k)) : 0;
+      const f = f0 + i, ult = i === N - 1, st = i === 0 ? [102, 103, 104, 105, 107, 108, 108, 109] : ult ? [114, 115, 116, 117, 31, 32, 32, 36] : [110, 111, 112, 113, 23, 24, 24, 25];
+      const g = (v, k2) => numeroCampo(v[k2]);
+      return { o: finito(o), xml: filaXml(f, [["A", st[0], t.nombre], ["B", st[1], g(iz, 0)], ["C", st[2], g(iz, 1)], ["D", st[3], g(iz, 2)],
+        ["E", st[1], g(de, 0)], ["F", st[2], g(de, 1)], ["G", st[3], g(de, 2)], ["H", 106, t.ancho], ["I", 106, t.alt], ["J", 2],
+        ["K", st[4], k, `+B${f}+C${f}/60+D${f}/3600`], ["L", st[5], l, `+E${f}+F${f}/60+G${f}/3600`], ["M", st[6], mm, `+(L${f}+K${f})/2`],
+        ["N", st[6], n, i ? `+M${f}-$M$${f0}` : null], ["O", st[7], finito(o), i ? `+(SIN(RADIANS(N${f}))/SIN(RADIANS(L${f}-K${f})))*H${f}` : null]]) };
+    });
   };
-  serie("Monopolo!$O$20:$O$24", xs.slice(0, n)); serie("Monopolo!$O$30:$O$34", ys.slice(0, n));
-  serie("Monopolo!$I$20:$I$24", alt); serie("Monopolo!$I$30:$I$34", alt);
+  const l1 = lado(d.lado1, f1), l2 = lado(d.lado2, f2);
+  // desplazamientos x, y, r (y la tolerancia H/200 al costado)
+  const desp = tr.map((t, i) => {
+    const f = fd + i, x = l1[i].o, y = l2[i].o, ult = i === N - 1, st = i === 0 ? [41, 42, 43, 44] : ult ? [47, 48, 49, 36] : [45, 46, 37, 25];
+    const tol = i === 0 ? [["H", 118, "Tolerancia de desplazamiento (Según TIA 222- G):"], ["I", 119], ["J", 119], ["K", 120], ["L", 120], ["M", 121]]
+      : i === 1 ? [["H", 122, "H/200"], ["I", 123, altTotal != null ? altTotal / 200 : null, "B7/200"], ["J", 124, "cm"], ["K", 125], ["L", 125], ["M", 126]] : [];
+    return filaXml(f, [["B", st[0], t.nombre, `+A${f1 + i}`], ["C", st[1], x, `+O${f1 + i}`], ["D", st[2], y, `+O${f2 + i}`],
+      ["E", st[3], x != null && y != null ? Math.hypot(x, y) : null, `+SQRT(C${f}^2+D${f}^2)`], ...tol]);
+  });
+  // verificación de puesta a plomo entre pares de tramos
+  const col = (j) => letraCol(6 + j);   // F, G, …
+  const P = tr.map((t, i) => ({ h: i === 0 ? 0 : t.alt, hh: t.alt, x: l1[i].o, y: l2[i].o }));
+  const ver = [
+    filaXml(fh, [["B", 2], ["C", 2], ["E", 41, "h"], ...P.map((p, j) => [col(j), j === 0 ? 127 : j === N - 1 ? 44 : 43, j === 0 ? 0 : p.hh, j === 0 ? null : `+I${f2 + j}`]), [col(N), 34]]),
+    filaXml(fh + 1, [["B", 2], ["C", 2], ["E", 45, "Y"], ...P.map((p, j) => [col(j), j === 0 ? 128 : j === N - 1 ? 25 : 37, p.y, `+D${fd + j}`]), [col(N), 37]]),
+    filaXml(fh + 2, [["B", 2], ["C", 2], ["E", 47, "X"], ...P.map((p, j) => [col(j), j === 0 ? 129 : j === N - 1 ? 36 : 49, p.x, `+C${fd + j}`]), [col(N), 37]]),
+    filaXml(fh + 3, [["B", 60, "h"], ["C", 61, "X"], ["D", 62, "Y"], ["E", 2], ["F", 63], ...P.slice(1).map((p, j) => [col(j + 1), 34])]),
+    ...P.map((p, i) => { const f = fm + i, pri = i === 0, ult = i === N - 1;
+      return filaXml(f, [["B", pri ? 130 : 64, p.hh, `+I${f2 + i}`], ["C", pri ? 51 : ult ? 131 : 54, p.x, `+C${fd + i}`], ["D", pri ? 52 : 55, p.y, `+D${fd + i}`], ["E", pri ? 2 : 54],
+        ...P.map((q, j) => { const c = col(j);
+          if (i === j) return [c, pri ? 66 : ult && j === N - 1 ? 132 : 70];
+          const v = p.x != null && q.x != null && p.y != null && q.y != null && (p.hh ?? 0) !== (q.h ?? 0) ? Math.abs(Math.hypot(p.x - q.x, p.y - q.y) / ((p.hh ?? 0) - (q.h ?? 0))) : null;
+          return [c, j === 0 ? 69 : j === N - 1 ? (pri ? 68 : 72) : pri ? 67 : 71, finito(v), `+ABS(SQRT((C${f}-${c}$${fh + 2})^2+(D${f}-${c}$${fh + 1})^2)/(B${f}-${c}$${fh}))`]; })]); }),
+    filaXml(fm + N, [["B", 73], ["C", 58], ["D", 59], ["E", 54], ...P.map((p, j) => [col(j), j === 0 ? 74 : j === N - 1 ? 133 : 75])]),
+  ];
+  const cuerpo = copiar(1, 19, 0) + l1.map((x) => x.xml).join("") + copiar(25, 29, dz) + l2.map((x) => x.xml).join("") + copiar(35, 39, 2 * dz)
+    + desp.join("") + copiar(45, 47, 3 * dz) + ver.join("") + copiar(58, 62, 4 * dz) + copiar(63, 400, 4 * dz);
+  h = h.replace(/<sheetData>[\s\S]*<\/sheetData>/, `<sheetData>${cuerpo}</sheetData>`)
+    .replace(/<brk id="45"/, `<brk id="${45 + 3 * dz}"`).replace(/<brk id="58"/, `<brk id="${58 + 4 * dz}"`)
+    .replace(/<dimension ref="[^"]*"\s*\/>/, `<dimension ref="A1:R${337 + 4 * dz}"/>`);
+  poner("xl/worksheets/sheet1.xml", h);
+  poner("xl/workbook.xml", leer("xl/workbook.xml").replace(/Monopolo!\$A\$1:\$O\$45/, `Monopolo!$A$1:$O$${45 + 3 * dz}`));
+  poner("xl/drawings/drawing1.xml", leer("xl/drawings/drawing1.xml").replace(/(<xdr:(?:from|to)><xdr:col>\d+<\/xdr:col><xdr:colOff>-?\d+<\/xdr:colOff><xdr:row>)(\d+)(<\/xdr:row>)/g, (t, a, n, b) => a + (+n + 4 * dz) + b));
+  // gráfico: las series toman exactamente las filas de los tramos
+  let g = leer("xl/charts/chart1.xml");
+  const serie = (viejo, nuevo, vals) => {
+    g = g.replace(new RegExp(`<c:f>${viejo.replace(/\$/g, "\\$")}</c:f><c:numCache>([\\s\\S]*?)<c:ptCount val="\\d+"\\s*/>[\\s\\S]*?</c:numCache>`),
+      (t, fmt) => `<c:f>${nuevo}</c:f><c:numCache>${fmt}<c:ptCount val="${vals.length}"/>${vals.map((v, i) => (v == null ? "" : `<c:pt idx="${i}"><c:v>${v}</c:v></c:pt>`)).join("")}</c:numCache>`);
+  };
+  const alts = tr.map((t) => t.alt);
+  serie("Monopolo!$O$20:$O$24", `Monopolo!$O$${f1}:$O$${f1 + N - 1}`, l1.map((x) => x.o)); serie("Monopolo!$I$20:$I$24", `Monopolo!$I$${f1}:$I$${f1 + N - 1}`, alts);
+  serie("Monopolo!$O$30:$O$34", `Monopolo!$O$${f2}:$O$${f2 + N - 1}`, l2.map((x) => x.o)); serie("Monopolo!$I$30:$I$34", `Monopolo!$I$${f2}:$I$${f2 + N - 1}`, alts);
   poner("xl/charts/chart1.xml", g);
   const nombre = `verticalidad-monopolo-${String(o.codigo || "monopolo").replace(/[^\w-]+/g, "")}-${String(m.fecha || hoy()).slice(0, 10)}.xlsx`;
   descargarZip(XLSX, zip, nombre);
