@@ -236,8 +236,15 @@ export const PERFILES_BASE = [
     datos: { fabricante: "Mingyuan/Ciemsa-Prosecco", altura_m: 100, medio_parante: "", desplome_admisible: "",
       niveles: [1.9, 14.5, 28.9, 41.5, 54.7, 69.1, 84.7, 96.7, 100].map((altura) => ({ altura, A: 120 })),
       tolerancia: 30, anclajes: ["A", "B", "C"],
-      riendas: [["1", "1/2 19h", 1280], ["2", "1/2 19h", 1280], ["3", "1/2 19h", 1280], ["4", "1/2 19h", 1280], ["5", "1/2 19h", 1280],
-        ["6", "5/8 19h", 1930], ["7d", "5/8 19h", 1930], ["7i", "5/8 19h", 1930], ["8d", "5/8 19h", 1930], ["8i", "5/8 19h", 1930]]
+      // tensión inicial del plano (kgf): 13 mm 1200 · 16 mm 1900 · 20 mm 2900 (sql/parte27)
+      riendas: [["1", "1/2 19h", 1200], ["2", "1/2 19h", 1200], ["3", "1/2 19h", 1200], ["4", "1/2 19h", 1200], ["5", "5/8 19h", 1900],
+        ["6d", "5/8 19h", 1900], ["6i", "5/8 19h", 1900], ["7d", "3/4 19h", 2900], ["7i", "3/4 19h", 2900]]
+        .map(([nombre, tipo, nominal]) => ({ nombre, tipo, nominal })) } },
+  { id: "6c0d5d2e-0003-4a3e-9a51-000000000060", nombre: "Mástil Mingyuan/Ciemsa-Prosecco 60 m", tipo: "mastil",
+    datos: { fabricante: "Mingyuan/Ciemsa-Prosecco", altura_m: 60, medio_parante: "", desplome_admisible: "",
+      niveles: [1.9, 14.1, 29.1, 43.5, 56.7, 60].map((altura) => ({ altura, A: 120 })),
+      tolerancia: 30, anclajes: ["A", "B", "C"],
+      riendas: [["1", "1/2 19h", 1200], ["2", "1/2 19h", 1200], ["3", "5/8 19h", 1900], ["4d", "3/4 19h", 2900], ["4i", "3/4 19h", 2900]]
         .map(([nombre, tipo, nominal]) => ({ nombre, tipo, nominal })) } },
 ];
 
