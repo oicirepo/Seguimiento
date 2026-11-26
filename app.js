@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-12";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-13";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -6035,8 +6035,8 @@ function enlazarMedicion(p, m) {
         inp.classList.toggle("mal", n != null && (isNaN(n) || n < 0 || n > Number(inp.dataset.max)));
         d[lado][Number(i)][cual][Number(k)] = v;
         cambio();
-        // al completar grados (3 cifras) o minutos y segundos (2) pasa solo a la casilla siguiente
-        if (((k === "0" && v.length >= 3) || (k !== "0" && /^\d{2}$/.test(v))) && entradas[idx + 1]) entradas[idx + 1].focus();
+        // grados: una cifra (0 o 1) y pasa solo; minutos y segundos: al completar 2 cifras
+        if (((k === "0" && /^\d$/.test(v)) || (k !== "0" && /^\d{2}$/.test(v))) && entradas[idx + 1]) entradas[idx + 1].focus();
         return;
       }
       const v = inp.value.replace(/[^\d.,-]/g, "");
