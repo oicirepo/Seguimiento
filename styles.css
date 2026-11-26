@@ -570,3 +570,71 @@ button.atajo { font: inherit; cursor: pointer; }
 .candado-menu button:hover, .candado-menu button[aria-pressed="true"] { background: #3a3a3a; }
 .popup-vertice .leaflet-popup-content { margin: 10px 30px 10px 12px; }
 .menu-vertice { display: grid; gap: 8px; font-size: 13px; }
+
+/* ---------- mediciones de campo: pantalla completa */
+.herramientas { display: flex; gap: 8px; margin-top: 8px; }
+.herramienta { flex: 1; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 6px; border: 1px dashed #55706f; border-radius: 8px; background: transparent; color: var(--tinta); font: 500 14px/1.2 var(--texto); cursor: pointer; }
+.herramienta svg { width: 18px; height: 18px; color: var(--acento); }
+.herramienta:hover { background: var(--hover); }
+body.con-medicion { overflow: hidden; }
+.medicion { position: fixed; inset: 0; z-index: 3000; display: flex; flex-direction: column; background: var(--fondo); }
+.med-barra { display: flex; align-items: center; gap: 8px; padding: 8px 12px; padding-top: max(8px, env(safe-area-inset-top)); border-bottom: 1px solid var(--linea-suave); background: #1A1A1A; }
+.med-barra h2 { flex: 1; margin: 0; font: 700 18px/1.2 var(--cond); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.med-pestanas { display: flex; border-bottom: 1px solid var(--linea-suave); background: #1E1E1E; }
+.med-pestanas button { flex: 1; padding: 11px 4px; border: 0; border-bottom: 3px solid transparent; background: none; color: var(--tinta-suave); font: 600 14px/1 var(--texto); cursor: pointer; }
+.med-pestanas button[aria-selected="true"] { color: var(--tinta); border-bottom-color: var(--acento); }
+.med-cuerpo { flex: 1; overflow: auto; padding: 14px 14px 24px; max-width: 760px; width: 100%; margin: 0 auto; }
+.med-pie { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; padding-bottom: max(10px, env(safe-area-inset-bottom)); border-top: 1px solid var(--linea-suave); background: #1A1A1A; font-size: 13px; color: var(--tinta-suave); cursor: pointer; }
+.med-pie b { color: var(--tinta); }
+.med-chip { display: inline-block; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--linea); font-size: 12px; font-weight: 700; color: var(--tinta-suave); }
+.med-chip.si { border-color: #2F7A45; background: rgba(59,165,92,.18); color: #9EE2B0; }
+.med-chip.no { border-color: #8A3A33; background: rgba(192,57,43,.2); color: #FFB4A9; }
+.med-nueva { width: 100%; margin-bottom: 14px; }
+.med-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.med-lista button { width: 100%; display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--linea); border-radius: 10px; background: var(--superficie); color: var(--tinta); font: inherit; text-align: left; cursor: pointer; }
+.med-lista button small { color: var(--tinta-suave); }
+.med-vacio { padding: 24px 6px; }
+.med-esquema { display: flex; justify-content: center; gap: 16px; margin-bottom: 4px; }
+.med-planta { width: 104px; height: 104px; }
+.med-costado { width: 92px; height: 150px; }
+.med-esquema text { fill: var(--tinta-suave); font: 600 10px var(--texto); }
+.med-esquema text.t { fill: #fff; font-size: 10px; }
+.med-esquema text.t2 { font-size: 8px; }
+.med-costado line { stroke: #777; stroke-width: 1; }
+.med-costado g.actual line { stroke: var(--acento); stroke-width: 3; }
+.med-costado g.actual text { fill: var(--acento); font-size: 12px; }
+.med-ayuda { margin: 4px 0 12px; }
+.med-tramos { display: grid; gap: 10px; }
+.med-tramo { padding: 10px 12px; border: 1px solid var(--linea-suave); border-radius: 10px; background: var(--superficie); }
+.med-tramo.actual { border-color: var(--acento-fuerte); box-shadow: 0 0 0 1px var(--acento-fuerte) inset; }
+.med-tramo h3 { margin: 0 0 8px; font: 700 16px/1.2 var(--cond); }
+.med-tramo h3 small { margin-left: 6px; font: 400 12px var(--texto); color: var(--tinta-suave); }
+.med-lect { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.med-lect > span { width: 66px; flex: none; font-size: 13px; color: var(--tinta-suave); }
+.gms { display: flex; gap: 6px; flex: 1; }
+.gms label { display: flex; align-items: flex-start; gap: 2px; flex: 1; }
+.gms input { width: 100%; min-width: 0; padding: 10px 6px; border: 1px solid var(--linea); border-radius: 8px; background: var(--campo); color: var(--tinta); font: 600 20px/1 var(--cond); text-align: center; }
+.gms input:focus { outline: 2px solid var(--acento); outline-offset: 0; }
+.gms input.mal { border-color: var(--error); color: var(--error); }
+.gms span { font: 700 18px/1 var(--cond); color: var(--tinta-suave); padding-top: 4px; }
+.med-desp { margin: 4px 0 0; font-size: 13px; color: var(--tinta-suave); }
+.med-desp b { color: var(--tinta); }
+.med-datos h3 { margin: 14px 0 0; font: 700 16px var(--cond); }
+.med-geo { width: 100%; border-collapse: collapse; }
+.med-geo th, .med-geo td { padding: 4px; text-align: left; font-size: 13px; }
+.med-geo input { width: 100%; padding: 8px; border: 1px solid var(--linea); border-radius: 6px; background: var(--campo); color: var(--tinta); font: inherit; }
+.med-veredicto { padding: 18px; border-radius: 12px; border: 1px solid var(--linea); text-align: center; font: 700 30px/1.1 var(--cond); letter-spacing: .02em; display: grid; gap: 6px; }
+.med-veredicto small { font: 500 13px/1.3 var(--texto); color: var(--tinta-suave); letter-spacing: 0; }
+.med-veredicto.si { border-color: #2F7A45; background: rgba(59,165,92,.14); color: #9EE2B0; }
+.med-veredicto.no { border-color: #8A3A33; background: rgba(192,57,43,.16); color: #FFB4A9; }
+.med-res { width: 100%; margin: 14px 0; border-collapse: collapse; font-size: 14px; }
+.med-res th, .med-res td { padding: 7px 6px; border-bottom: 1px solid var(--linea-suave); text-align: right; }
+.med-res th:first-child, .med-res td:first-child { text-align: left; }
+.med-res tr.fuera td { color: #FFB4A9; }
+.med-grafico { width: 100%; max-width: 420px; display: block; margin: 0 auto; }
+.med-grafico text { fill: var(--tinta-suave); font: 10px var(--texto); }
+.med-grafico .tol { stroke: #C0392B; stroke-dasharray: 5 4; }
+.med-leyenda { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; font-size: 12px; color: var(--tinta-suave); }
+.med-leyenda span::before { content: ""; display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; background: var(--c, #C0392B); }
+.med-leyenda .tol::before { background: none; border-top: 2px dashed #C0392B; }
+@media (max-width: 760px) { .med-barra h2 { font-size: 16px; } .gms input { font-size: 19px; padding: 11px 4px; } }

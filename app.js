@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-25-10";
+import { crearApi } from "./api.js?v=2026-11-26-2";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -296,7 +296,7 @@ async function salirCuenta() {
 // este dispositivo (lista de pendientes) y se suben solos, en orden, cuando vuelve la conexión.
 // Si mientras tanto otra persona cambió lo mismo, no se pisa: queda marcado para que elijas.
 const CLAVE_PEND = "obras-oici-pendientes-v1" + (DEMO ? "-demo" : "");
-const OPS_SIN_RED = ["cambiarEstado", "guardarDatos", "marcarHito", "agregarNota", "crearPunto"];
+const OPS_SIN_RED = ["cambiarEstado", "guardarDatos", "marcarHito", "agregarNota", "crearPunto", "guardarMedicion"];
 const DATOS_DE_CAPA = { estructura: "estructura", obra: "obra", relevamiento: "relev", amojonamiento: "amoj" };
 const NOMBRE_NUEVO = { estructura: "Estructura", obra: "Obra", relevamiento: "Punto de relevamiento", amojonamiento: "Mojón" };
 S.pend = leerJSON(CLAVE_PEND) || [];
@@ -379,6 +379,7 @@ function descripcionPend(op, args) {
     return `${c?.codigo || "Hito"}: ${c?.h?.nombre || "hito"} → ${a1.estado ? a1.estado.toLowerCase() : "fecha " + fecha(a1.fecha_real)}`;
   }
   if (op === "agregarNota") return `${cod(a0, a1)}: nota en el cuaderno`;
+  if (op === "guardarMedicion") return `${cod("estructura", a0.estructura_id)}: medición de ${MED_TIPO[a0.tipo]?.titulo.toLowerCase() || "campo"} del ${fecha(String(a0.fecha).slice(0, 10))}`;
   return op;
 }
 
@@ -394,6 +395,11 @@ function encolar(op, args) {
   }
   if ((op === "agregarNota" && a1 < 0) || (op === "marcarHito" && contextoHito(a0)?.id < 0))
     throw new Error("Este punto todavía no se subió: los hitos y el cuaderno se pueden cargar cuando vuelva la señal.");
+  // una misma medición guardada varias veces sin señal: queda solo la última versión
+  if (op === "guardarMedicion") {
+    const antes = S.pend.find((p) => p.op === op && p.args[0].id === a0.id && !p.conflicto && !p.error);
+    if (antes) { antes.args = structuredClone(args); antes.cuando = Date.now(); guardarPend(); avisoEncolado(); return; }
+  }
   const p = { n: Date.now() + S.pend.length, op, args: structuredClone(args), email: S.usuario?.email, cuando: Date.now(), txt: descripcionPend(op, args) };
   if (op === "guardarDatos" || op === "cambiarEstado") {
     const o = buscarElemento(a0, a1);
@@ -2402,7 +2408,7 @@ function enlazarFilas(cont) {
 function prepararMapa() {
   if (S.mapa) return;
   S.mapa = L.map("mapa", { zoomControl: false, attributionControl: true, maxZoom: 21 }).setView([-32.6, -56.0], 7);
-  if (new URLSearchParams(location.search).has("demo")) { window.__mapa = S.mapa; window.__S = S; window.__candadoAuto = candadoAuto; } // para las pruebas de la demostración
+  if (new URLSearchParams(location.search).has("demo")) { window.__mapa = S.mapa; window.__S = S; window.__candadoAuto = candadoAuto; window.__calcVert = calcularVerticalidad; window.__MD = MD; window.__pintarMed = () => pintarMedicion(); window.__abrirFicha = abrirFicha; } // para las pruebas de la demostración
   agregarBotonesPaneles();
   L.control.zoom({ position: "topright", zoomInTitle: "Acercar", zoomOutTitle: "Alejar" }).addTo(S.mapa);
   agregarBotonUbicacion();
@@ -2499,6 +2505,7 @@ function pintarMapa(v) {
 // ------------------------------------------------------------ ficha
 // Planos, Google Maps y Waze en una fila (mismos enlaces que arma QGIS).
 const ICONO = {
+  medir: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M8 21h8M12 3l-5 9M12 3l5 9M5 14h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   planos: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2.2h8.4A1.5 1.5 0 0 1 21 8.7v9.8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
   maps: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5s-6.5-6.2-6.5-11.3a6.5 6.5 0 0 1 13 0c0 5.1-6.5 11.3-6.5 11.3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="10.2" r="2.4" fill="currentColor"/></svg>',
   waze: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 20.5 12 16.3 4 20.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>',
@@ -2604,7 +2611,7 @@ function pintarFicha(tipo, o, hitos, notas) {
         : boton(o.planos, "planos", "Planos")}
       ${boton(o.lat != null ? `https://www.google.com/maps/dir/?api=1&destination=${o.lat}%2C${o.lon}&travelmode=driving` : "", "maps", "Maps")}
       ${boton(o.lat != null ? `https://waze.com/ul?ll=${o.lat},${o.lon}&navigate=yes` : "", "waze", "Waze")}
-    </div>`;
+    </div>${herramientasHtml(tipo, o)}`;
 
   const opciones = [["PROY", "Proyecto"], ["CONS", "En obra"], ["FIN", "Terminada"]]
     .map(([v, n]) => `<option value="${v}" ${o.estado === v ? "selected" : ""}>${n}</option>`).join("");
@@ -2683,6 +2690,7 @@ function pintarFicha(tipo, o, hitos, notas) {
     } catch (e) { aviso(e.message, true); cc.disabled = false; cc.querySelector("span").textContent = "Crear carpeta"; }
   };
   enlazarAyudamemoria(ficha, tipo, o);
+  enlazarHerramientas(ficha, tipo, o);
   enlazarCandado(ficha, tipo, o);
   const ed = $("#editar-datos", ficha);
   if (ed) ed.onclick = () => editarDatos(tipo, o);
@@ -5392,3 +5400,504 @@ function dibujarMedida() {
 }
 
 iniciar();
+
+// ------------------------------------------------------------ mediciones de campo (verticalidad, tensión de riendas)
+// Pantalla completa para cargar en el lugar las lecturas del teodolito (° ′ ″) y ver al instante si cumple.
+// Se guardan en Neon (tabla «mediciones», sql/parte25), vinculadas a la estructura; mientras se cargan quedan
+// como borrador en el dispositivo y, sin señal, se suben solas después (como el resto de los cambios).
+const MED_TIPO = {
+  verticalidad_monopolo: { titulo: "Verticalidad", lista: true },
+  verticalidad_mastil: { titulo: "Verticalidad de mástil", lista: false },
+  tension_riendas: { titulo: "Tensión de riendas", lista: false },
+};
+// Planilla del monopolo de 40 m (MP40): ancho del fuste y altura de cada punto leído
+const TRAMOS_MP40 = [
+  { nombre: "1", ancho: 134, altura: 0 }, { nombre: "2", ancho: 116, altura: 900 }, { nombre: "3", ancho: 97.3, altura: 1834 },
+  { nombre: "4", ancho: 75.5, altura: 2872 }, { nombre: "Tope", ancho: 50.6, altura: 4000 },
+];
+const LADOS = ["lado1", "lado2"];
+const CLAVE_BORRADORES = "obras-oici-mediciones-v1" + (DEMO ? "-demo" : "");
+const MD = { m: null, o: null, pestana: "lado1", tramo: 0, lista: [] };
+
+const numeroCampo = (v) => (v === "" || v == null ? null : Number(String(v).replace(",", ".")));
+const aDecimal = (g) => {
+  if (!g) return null;
+  const [a, b, c] = g.map(numeroCampo);
+  if (a == null) return null;
+  return a + (b || 0) / 60 + (c || 0) / 3600;
+};
+const alturaTotalDe = (o) => {
+  const m = String(o.estructura || "").match(/\d+(?:[.,]\d+)?/);
+  return m ? Math.round(Number(m[0].replace(",", ".")) * 100) : null;
+};
+function nuevaMedicion(o, tipo) {
+  const h = alturaTotalDe(o);
+  return {
+    id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    estructura_id: o.id, tipo, fecha: hoy(), nueva: true,
+    datos: {
+      radiobase: o.codigo || "", departamento: (departamentoDe(Number(o.lat), Number(o.lon)) || "").toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()),
+      altura: h || 4000, instrumento: "", observaciones: "", licitacion: o.licitacion || "", empresa: "", representante: "", firma: "",
+      tramos: h === 4000 || !h ? structuredClone(TRAMOS_MP40) : TRAMOS_MP40.map((t, i) => ({ nombre: t.nombre, ancho: null, altura: i === 0 ? 0 : i === TRAMOS_MP40.length - 1 ? h : null })),
+      lado1: TRAMOS_MP40.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })),
+      lado2: TRAMOS_MP40.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })),
+    },
+  };
+}
+
+// Cálculo, igual que la planilla: φ med = punto medio entre los bordes izquierdo y derecho; el desplazamiento de
+// cada tramo es sen(Δφ med) / sen(φ der − φ izq) × ancho, respecto del tramo 1. Las lecturas que pasan por 0°/360°
+// se acomodan antes (la planilla da lo mismo porque lo hace igual en todos los tramos).
+function desplazamientos(lado, tramos) {
+  const medios = lado.map((l) => {
+    const iz = aDecimal(l.iz), de0 = aDecimal(l.de);
+    if (iz == null || de0 == null) return null;
+    let de = de0;
+    while (de < iz - 180) de += 360;
+    while (de > iz + 180) de -= 360;
+    return { medio: iz + (de - iz) / 2, ang: de - iz };
+  });
+  const base = medios[0];
+  return medios.map((m, i) => {
+    if (i === 0) return m ? 0 : null;
+    if (!m || !base || !tramos[i]?.ancho || Math.abs(Math.sin((m.ang * Math.PI) / 180)) < 1e-9) return null;
+    let dj = m.medio - base.medio;
+    dj = ((((dj + 180) % 360) + 360) % 360) - 180;
+    return (Math.sin((dj * Math.PI) / 180) / Math.sin((m.ang * Math.PI) / 180)) * Number(tramos[i].ancho);
+  });
+}
+function calcularVerticalidad(d) {
+  const x = desplazamientos(d.lado1, d.tramos), y = desplazamientos(d.lado2, d.tramos);
+  const filas = d.tramos.map((t, i) => {
+    const r = x[i] != null && y[i] != null ? Math.hypot(x[i], y[i]) : null;
+    return { nombre: t.nombre, h: numeroCampo(t.altura), x: x[i], y: y[i], r };
+  });
+  const tol = numeroCampo(d.altura) ? numeroCampo(d.altura) / 200 : null;
+  const conR = filas.filter((f) => f.r != null);
+  const max = conR.length ? Math.max(...conR.map((f) => f.r)) : null;
+  // inclinación entre tramos seguidos (como «Verificación de puesta a plomo»)
+  let incl = null;
+  for (let i = 1; i < filas.length; i++) {
+    const a = filas[i - 1], b = filas[i];
+    if (a.r == null || b.r == null || !(b.h - a.h)) continue;
+    const v = Math.hypot(b.x - a.x, b.y - a.y) / Math.abs(b.h - a.h);
+    if (incl == null || v > incl.v) incl = { v, de: a.nombre, a: b.nombre };
+  }
+  const completo = conR.length === filas.length && filas.length > 1;
+  return { filas, tol, max, incl, completo, cumple: max != null && tol != null ? max <= tol : null };
+}
+
+// ---- borradores en el dispositivo
+const leerBorradores = () => leerJSON(CLAVE_BORRADORES) || {};
+function guardarBorrador() {
+  if (!MD.m) return;
+  const t = leerBorradores();
+  t[MD.m.id] = { ...MD.m, borrador: Date.now() };
+  escribirJSON(CLAVE_BORRADORES, t);
+}
+function quitarBorrador(id) { const t = leerBorradores(); delete t[id]; escribirJSON(CLAVE_BORRADORES, t); }
+
+// ---- botones en la ficha
+function herramientasHtml(tipo, o) {
+  if (tipo !== "estructura") return "";
+  const mono = forma("estructura", o) === "circulo";
+  const b = (t, txt) => `<button class="herramienta" type="button" data-medir="${t}">${ICONO.medir}<span>${txt}</span></button>`;
+  return `<div class="herramientas">${mono ? b("verticalidad_monopolo", "Verticalidad")
+    : b("verticalidad_mastil", "Verticalidad") + b("tension_riendas", "Tensión de riendas")}</div>`;
+}
+function enlazarHerramientas(ficha, tipo, o) {
+  ficha.querySelectorAll("[data-medir]").forEach((b) => (b.onclick = () => abrirMediciones(o, b.dataset.medir)));
+}
+
+// ---- pantalla completa
+function pantallaMedicion() {
+  let p = $("#medicion");
+  if (!p) {
+    p = document.createElement("section");
+    p.id = "medicion"; p.className = "medicion"; p.setAttribute("role", "dialog"); p.setAttribute("aria-modal", "true");
+    document.body.append(p);
+  }
+  p.hidden = false;
+  document.body.classList.add("con-medicion");
+  return p;
+}
+function cerrarMedicion() {
+  guardarBorrador();
+  MD.m = null;
+  $("#medicion").hidden = true;
+  document.body.classList.remove("con-medicion");
+}
+
+// Lista de mediciones de la estructura (y las que quedaron como borrador en este dispositivo)
+async function abrirMediciones(o, tipo) {
+  const p = pantallaMedicion();
+  MD.o = o;
+  const def = MED_TIPO[tipo];
+  if (!def.lista) {
+    p.innerHTML = `<header class="med-barra"><button class="boton boton-chico" type="button" data-volver>‹ Volver</button>
+        <h2>${esc(def.titulo)} · ${esc(o.codigo)}</h2></header>
+      <div class="med-cuerpo"><div class="med-vacio">
+        <p><b>${esc(def.titulo)} para mástiles</b></p>
+        <p class="nota">El acceso ya está listo. Falta la planilla de Excel de ${def.titulo.toLowerCase()} para mástiles: cuando la pases, se arma la carga en campo y la exportación, igual que la de los monopolos.</p>
+      </div></div>`;
+    p.querySelector("[data-volver]").onclick = cerrarMedicion;
+    return;
+  }
+  p.innerHTML = `<header class="med-barra"><button class="boton boton-chico" type="button" data-volver>‹ Volver</button>
+      <h2>${esc(def.titulo)} · ${esc(o.codigo)}</h2></header>
+    <div class="med-cuerpo">
+      ${editor() ? `<button class="boton boton-primario med-nueva" type="button" id="med-nueva">+ Nueva medición</button>` : ""}
+      <ul class="med-lista" id="med-lista"><li class="nota">Cargando…</li></ul>
+    </div>`;
+  p.querySelector("[data-volver]").onclick = cerrarMedicion;
+  $("#med-nueva")?.addEventListener("click", () => editarMedicion(nuevaMedicion(o, tipo)));
+  let guardadas = [], aviso_ = "";
+  try { guardadas = await S.api.mediciones(o.id); }
+  catch (e) { aviso_ = sinRed(e) ? "Sin conexión: se muestran solo las que están en este dispositivo." : e.message; }
+  const borr = Object.values(leerBorradores()).filter((m) => m.estructura_id === o.id && m.tipo === tipo);
+  const pend = misPend().filter((p) => p.op === "guardarMedicion" && p.args[0].estructura_id === o.id).map((p) => ({ ...p.args[0], pendiente: true }));
+  const porId = new Map();
+  for (const m of [...guardadas, ...pend, ...borr]) porId.set(m.id, { ...porId.get(m.id), ...m });
+  MD.lista = [...porId.values()].filter((m) => m.tipo === tipo).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+  const ul = $("#med-lista");
+  if (!ul) return;
+  ul.innerHTML = (aviso_ ? `<li class="nota">${esc(aviso_)}</li>` : "") + (MD.lista.length ? MD.lista.map((m) => {
+    const r = m.resultado || calcularVerticalidad(m.datos);
+    const est = r.cumple == null ? `<span class="med-chip">incompleta</span>` : r.cumple ? `<span class="med-chip si">Cumple</span>` : `<span class="med-chip no">No cumple</span>`;
+    return `<li><button type="button" data-abrir="${esc(m.id)}">
+        <span><b>${fecha(String(m.fecha).slice(0, 10))}</b> ${est}${m.borrador && !m.creado ? ` <span class="sin-subir">borrador</span>` : m.pendiente ? ` <span class="sin-subir">sin subir</span>` : ""}</span>
+        <small>${(r.max ?? r.max_cm) != null ? `máx. ${numero(r.max ?? r.max_cm, 1)} cm de ${numero(r.tol ?? r.tolerancia_cm, 1)} cm${r.completo === false ? " (faltan tramos)" : ""}` : "faltan lecturas"}${m.autor ? ` · ${esc(m.autor)}` : ""}</small></button></li>`;
+  }).join("") : `<li class="nota">Todavía no hay mediciones de esta estructura.${editor() ? " Tocá «Nueva medición» para cargar la primera." : ""}</li>`);
+  ul.querySelectorAll("[data-abrir]").forEach((b) => (b.onclick = () => editarMedicion(structuredClone(MD.lista.find((m) => m.id === b.dataset.abrir)))));
+}
+
+function editarMedicion(m) {
+  MD.m = m;
+  MD.pestana = MD.pestana === "datos" || MD.pestana === "resultado" ? MD.pestana : "lado1";
+  if (m.nueva) MD.pestana = "lado1";
+  MD.tramo = 0;
+  pintarMedicion();
+}
+
+function pintarMedicion() {
+  const p = pantallaMedicion(), m = MD.m, o = MD.o, d = m.datos;
+  const r = calcularVerticalidad(d);
+  const puede = editor();
+  const pest = [["lado1", "Lado 1"], ["lado2", "Lado 2"], ["resultado", "Resultado"], ["datos", "Datos"]];
+  p.innerHTML = `<header class="med-barra">
+      <button class="boton boton-chico" type="button" data-volver>‹ Mediciones</button>
+      <h2>Verticalidad · ${esc(o.codigo)}</h2>
+      <button class="boton boton-chico" type="button" id="med-excel" title="Descargar la planilla de verticalidad con estos datos">Excel</button>
+      ${puede ? `<button class="boton boton-primario boton-chico" type="button" id="med-guardar">Guardar</button>` : ""}
+    </header>
+    <nav class="med-pestanas" role="tablist">${pest.map(([k, t]) => `<button type="button" role="tab" data-pest="${k}" aria-selected="${MD.pestana === k}">${t}</button>`).join("")}</nav>
+    <div class="med-cuerpo" id="med-cuerpo">${MD.pestana === "datos" ? datosHtml(d, puede) : MD.pestana === "resultado" ? resultadoHtml(r, d) : ladoHtml(MD.pestana, d, r, puede)}</div>
+    <footer class="med-pie" id="med-pie">${pieHtml(r)}</footer>`;
+  p.querySelector("[data-volver]").onclick = () => { guardarBorrador(); abrirMediciones(o, m.tipo); };
+  p.querySelectorAll("[data-pest]").forEach((b) => (b.onclick = () => { MD.pestana = b.dataset.pest; pintarMedicion(); }));
+  $("#med-excel").onclick = (ev) => exportarVerticalidad(m, o, ev.currentTarget);
+  $("#med-guardar")?.addEventListener("click", guardarMedicionActual);
+  $("#med-pie").onclick = () => { if (MD.pestana !== "resultado") { MD.pestana = "resultado"; pintarMedicion(); } };
+  enlazarMedicion(p, d);
+}
+
+const fmtCm = (v, dec = 1) => (v == null ? "—" : `${numero(v, dec)} cm`);
+function pieHtml(r) {
+  if (r.cumple == null) {
+    const faltan = r.filas.filter((f) => f.r == null).length;
+    return `<span class="med-chip">${faltan ? `Faltan lecturas en ${faltan} tramo${faltan === 1 ? "" : "s"}` : "Faltan datos"}</span>
+      <span>Tolerancia H/200: ${fmtCm(r.tol)}</span>`;
+  }
+  return `<span class="med-chip ${r.cumple ? "si" : "no"}">${r.cumple ? "Cumple" : "No cumple"}</span>
+    <span>Desplazamiento máx. <b>${fmtCm(r.max)}</b> · tolerancia ${fmtCm(r.tol)}${r.completo ? "" : " (con los tramos cargados)"}</span>`;
+}
+
+// Esquema: vista de arriba (dónde se para el teodolito) y de costado (qué tramo se está leyendo)
+function esquemaHtml(lado, d, tramo) {
+  const n = d.tramos.length;
+  const alto = 200, base = 186, arriba = 18;
+  const ys = d.tramos.map((t, i) => {
+    const h = numeroCampo(t.altura), H = numeroCampo(d.altura) || numeroCampo(d.tramos[n - 1].altura) || 1;
+    return h != null ? base - ((base - arriba) * h) / H : base - ((base - arriba) * i) / (n - 1);
+  });
+  const ancho = (i) => 6 + 9 * (1 - i / Math.max(1, n - 1));
+  const costado = `<svg viewBox="0 0 120 ${alto}" class="med-costado" aria-label="Monopolo de costado: tramo ${esc(d.tramos[tramo]?.nombre)}">
+    <line x1="10" y1="${base + 4}" x2="110" y2="${base + 4}" stroke="#666" stroke-width="2"/>
+    <path d="M${60 - ancho(0)} ${base} L${60 - ancho(n - 1)} ${arriba} L${60 + ancho(n - 1)} ${arriba} L${60 + ancho(0)} ${base}Z" fill="#3a3a3a" stroke="#888" stroke-width="1"/>
+    ${ys.map((y, i) => `<g class="${i === tramo ? "actual" : ""}"><line x1="${60 - ancho(i) - 6}" y1="${y}" x2="${60 + ancho(i) + 6}" y2="${y}"/>
+      <text x="${60 + ancho(i) + 10}" y="${y + 4}">${esc(d.tramos[i].nombre)}</text></g>`).join("")}
+  </svg>`;
+  // de arriba: el lado 2 queda a 90° del lado 1
+  const ang = lado === "lado1" ? 90 : 0;
+  const tx = 60 + 46 * Math.cos((ang * Math.PI) / 180), ty = 60 + 46 * Math.sin((ang * Math.PI) / 180);
+  const otro = lado === "lado1" ? [106, 60] : [60, 106];
+  const planta = `<svg viewBox="0 0 120 120" class="med-planta" aria-label="Vista de arriba: el teodolito en el ${lado === "lado1" ? "lado 1" : "lado 2"}">
+    <circle cx="60" cy="60" r="11" fill="#3a3a3a" stroke="#aaa" stroke-width="1.5"/>
+    <line x1="${tx}" y1="${ty}" x2="60" y2="60" stroke="var(--acento)" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <g transform="translate(${tx} ${ty})"><circle r="8" fill="var(--acento-fuerte)" stroke="var(--acento)"/><text y="4" text-anchor="middle" class="t">${lado === "lado1" ? "1" : "2"}</text></g>
+    <g transform="translate(${otro[0]} ${otro[1]})" opacity=".45"><circle r="6" fill="none" stroke="#888" stroke-dasharray="2 2"/><text y="3.5" text-anchor="middle" class="t2">${lado === "lado1" ? "2" : "1"}</text></g>
+    <text x="60" y="${lado === "lado1" ? 14 : 116}" text-anchor="middle" class="t2">${lado === "lado1" ? "90° del lado 2" : "90° del lado 1"}</text>
+  </svg>`;
+  return `<div class="med-esquema">${planta}${costado}</div>`;
+}
+
+function gmsHtml(lado, i, cual, v, puede) {
+  const nombres = ["°", "′", "″"], max = [359, 59, 59.9];
+  return `<div class="gms" role="group" aria-label="${cual === "iz" ? "Borde izquierdo" : "Borde derecho"}">${v.map((x, k) =>
+    `<label><input inputmode="${k === 2 ? "decimal" : "numeric"}" autocomplete="off" data-gms="${lado}:${i}:${cual}:${k}" value="${esc(x)}" ${puede ? "" : "disabled"}
+      maxlength="${k === 0 ? 3 : k === 1 ? 2 : 5}" aria-label="${["grados", "minutos", "segundos"][k]}" data-max="${max[k]}"><span>${nombres[k]}</span></label>`).join("")}</div>`;
+}
+function ladoHtml(lado, d, r, puede) {
+  const t = MD.tramo, desp = lado === "lado1" ? "x" : "y";
+  return `${esquemaHtml(lado, d, t)}
+    <p class="nota med-ayuda">Parate en el <b>${lado === "lado1" ? "lado 1" : "lado 2"}</b> (a 90° del otro). En cada tramo, apuntá al borde izquierdo y al derecho del fuste y anotá el ángulo horizontal.</p>
+    <div class="med-tramos">${d.tramos.map((tr, i) => {
+      const l = d[lado][i], v = r.filas[i][desp];
+      return `<section class="med-tramo${i === t ? " actual" : ""}" data-tramo="${i}">
+        <h3>Tramo ${esc(tr.nombre)} <small>${tr.altura != null && tr.altura !== "" ? `a ${numero(numeroCampo(tr.altura) / 100, 2)} m` : "falta la altura"} · ancho ${tr.ancho != null && tr.ancho !== "" ? numero(numeroCampo(tr.ancho), 1) + " cm" : "—"}</small></h3>
+        <div class="med-lect"><span>Izquierda</span>${gmsHtml(lado, i, "iz", l.iz, puede)}</div>
+        <div class="med-lect"><span>Derecha</span>${gmsHtml(lado, i, "de", l.de, puede)}</div>
+        <p class="med-desp" data-desp="${i}">${i === 0 ? "Tramo de referencia (desplazamiento 0)" : v == null ? "Desplazamiento: —" : `Desplazamiento ${desp}: <b>${numero(v, 1)} cm</b>`}</p>
+      </section>`;
+    }).join("")}</div>`;
+}
+
+function datosHtml(d, puede) {
+  const dis = puede ? "" : "disabled";
+  const campo = (k, t, tipo = "text", extra = "") => `<label>${t}<input type="${tipo}" data-dato="${k}" value="${esc(d[k] ?? "")}" ${dis} ${extra}></label>`;
+  return `<div class="form med-datos">
+    <label>Fecha<input type="date" data-fecha value="${esc(String(MD.m.fecha || "").slice(0, 10))}" ${dis}></label>
+    <div class="dos">${campo("radiobase", "Radiobase")}${campo("departamento", "Departamento")}</div>
+    ${campo("altura", "Altura total (cm)", "text", 'inputmode="decimal"')}
+    ${campo("instrumento", "Instrumento y fecha de calibración")}
+    <label>Observaciones<textarea data-dato="observaciones" rows="2" ${dis}>${esc(d.observaciones || "")}</textarea></label>
+    ${campo("licitacion", "Licitación de la inspección")}
+    ${campo("empresa", "Empresa responsable")}
+    ${campo("representante", "Representante técnico")}
+    ${campo("firma", "Firma y n° de Caja Profesional")}
+    <h3>Tramos del monopolo</h3>
+    <p class="nota">Ancho del fuste y altura de cada punto donde se lee, como en la planilla. Vienen los del monopolo de 40 m (MP40); si es otro modelo, cambialos según el plano del fabricante.</p>
+    <table class="med-geo"><thead><tr><th>Tramo</th><th>Ancho (cm)</th><th>Altura (cm)</th></tr></thead><tbody>
+      ${d.tramos.map((t, i) => `<tr><td>${esc(t.nombre)}</td>
+        <td><input inputmode="decimal" data-geo="${i}:ancho" value="${esc(t.ancho ?? "")}" ${dis} aria-label="Ancho del tramo ${esc(t.nombre)}"></td>
+        <td><input inputmode="decimal" data-geo="${i}:altura" value="${esc(t.altura ?? "")}" ${dis} aria-label="Altura del tramo ${esc(t.nombre)}"></td></tr>`).join("")}
+    </tbody></table>
+    ${puede && !MD.m.nueva ? `<button class="boton boton-peligro" type="button" id="med-borrar">Borrar esta medición</button>` : ""}
+  </div>`;
+}
+
+// gráfico de desplazamientos según la altura (como el de la planilla), con la tolerancia
+function graficoHtml(r) {
+  const f = r.filas.filter((x) => x.h != null);
+  if (!f.length) return "";
+  const W = 300, H = 260, m = { l: 40, r: 12, t: 10, b: 26 };
+  const hmax = Math.max(...f.map((x) => x.h), 1);
+  const lim = Math.max(r.tol || 0, ...f.flatMap((x) => [Math.abs(x.x ?? 0), Math.abs(x.y ?? 0)]), 1) * 1.15;
+  const X = (v) => m.l + ((v + lim) / (2 * lim)) * (W - m.l - m.r), Y = (h) => H - m.b - (h / hmax) * (H - m.t - m.b);
+  const linea = (k, c) => {
+    const pts = f.filter((x) => x[k] != null).map((x) => `${X(x[k]).toFixed(1)},${Y(x.h).toFixed(1)}`);
+    return pts.length ? `<polyline points="${pts.join(" ")}" fill="none" stroke="${c}" stroke-width="2"/>${pts.map((p) => `<circle cx="${p.split(",")[0]}" cy="${p.split(",")[1]}" r="3" fill="${c}"/>`).join("")}` : "";
+  };
+  const tol = r.tol ? `<line x1="${X(-r.tol)}" y1="${m.t}" x2="${X(-r.tol)}" y2="${H - m.b}" class="tol"/><line x1="${X(r.tol)}" y1="${m.t}" x2="${X(r.tol)}" y2="${H - m.b}" class="tol"/>` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" class="med-grafico" role="img" aria-label="Desplazamiento de cada lado según la altura">
+    <line x1="${X(0)}" y1="${m.t}" x2="${X(0)}" y2="${H - m.b}" stroke="#555"/>
+    <line x1="${m.l}" y1="${H - m.b}" x2="${W - m.r}" y2="${H - m.b}" stroke="#555"/>
+    ${tol}${linea("x", "#6CC4D1")}${linea("y", "#F2C14E")}
+    <text x="${m.l - 4}" y="${m.t + 8}" text-anchor="end">${numero(hmax / 100, 0)} m</text>
+    <text x="${m.l - 4}" y="${H - m.b}" text-anchor="end">0</text>
+    <text x="${X(-lim)}" y="${H - 8}">−${numero(lim, 0)} cm</text><text x="${X(lim)}" y="${H - 8}" text-anchor="end">+${numero(lim, 0)} cm</text>
+  </svg>
+  <p class="med-leyenda"><span style="--c:#6CC4D1">Lado 1 (x)</span><span style="--c:#F2C14E">Lado 2 (y)</span>${r.tol ? `<span class="tol">Tolerancia ±${numero(r.tol, 1)} cm</span>` : ""}</p>`;
+}
+function resultadoHtml(r, d) {
+  const grande = r.cumple == null ? `<div class="med-veredicto">Faltan lecturas</div>`
+    : `<div class="med-veredicto ${r.cumple ? "si" : "no"}">${r.cumple ? "CUMPLE" : "NO CUMPLE"}<small>desplazamiento máx. ${fmtCm(r.max)} · tolerancia H/200 = ${fmtCm(r.tol)} (TIA-222-G)</small></div>`;
+  return `${grande}
+    <table class="med-res"><thead><tr><th>Tramo</th><th>Altura</th><th>x</th><th>y</th><th>r</th></tr></thead><tbody>
+      ${r.filas.map((f) => `<tr class="${f.r != null && r.tol != null && f.r > r.tol ? "fuera" : ""}"><td>${esc(f.nombre)}</td><td>${f.h != null ? numero(f.h / 100, 2) + " m" : "—"}</td>
+        <td>${fmtCm(f.x)}</td><td>${fmtCm(f.y)}</td><td><b>${fmtCm(f.r)}</b></td></tr>`).join("")}
+    </tbody></table>
+    ${graficoHtml(r)}
+    ${r.incl ? `<p class="nota">Mayor inclinación entre tramos seguidos: 1/${numero(1 / r.incl.v, 0)} (entre ${esc(r.incl.de)} y ${esc(r.incl.a)}).</p>` : ""}
+    <p class="nota">Cálculo igual que la planilla: r = √(x² + y²) en cada tramo, con x del lado 1 e y del lado 2, respecto del tramo 1.</p>`;
+}
+
+function refrescarCalculo() {
+  const r = calcularVerticalidad(MD.m.datos);
+  $("#med-pie").innerHTML = pieHtml(r);
+  const lado = MD.pestana, k = lado === "lado1" ? "x" : "y";
+  if (lado === "lado1" || lado === "lado2") document.querySelectorAll("[data-desp]").forEach((p) => {
+    const i = Number(p.dataset.desp), v = r.filas[i][k];
+    if (i > 0) p.innerHTML = v == null ? "Desplazamiento: —" : `Desplazamiento ${k}: <b>${numero(v, 1)} cm</b>`;
+  });
+}
+
+function enlazarMedicion(p, d) {
+  const cambio = () => { MD.m.cambiado = true; guardarBorrador(); refrescarCalculo(); };
+  const marcarTramo = (i) => {
+    if (MD.tramo === i) return;
+    MD.tramo = i;
+    p.querySelectorAll(".med-tramo").forEach((s) => s.classList.toggle("actual", Number(s.dataset.tramo) === i));
+    p.querySelectorAll(".med-costado g").forEach((g, k) => g.classList.toggle("actual", k === i));
+  };
+  const entradas = [...p.querySelectorAll("[data-gms]")];
+  entradas.forEach((inp, idx) => {
+    inp.onfocus = () => { marcarTramo(Number(inp.dataset.gms.split(":")[1])); inp.select(); };
+    inp.oninput = () => {
+      const [lado, i, cual, k] = inp.dataset.gms.split(":");
+      const v = inp.value.replace(/[^\d.,]/g, "");
+      if (v !== inp.value) inp.value = v;
+      const n = numeroCampo(v);
+      inp.classList.toggle("mal", n != null && (isNaN(n) || n < 0 || n > Number(inp.dataset.max)));
+      d[lado][Number(i)][cual][Number(k)] = v;
+      cambio();
+      // al completar grados (3 cifras) o minutos (2) pasa solo al siguiente
+      const lleno = (k === "0" && v.length >= 3) || (k !== "0" && /^\d{2}$/.test(v));
+      if (lleno && entradas[idx + 1]) entradas[idx + 1].focus();
+    };
+    inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); entradas[idx + 1]?.focus(); } };
+  });
+  p.querySelectorAll(".med-tramo").forEach((s) => s.addEventListener("click", () => marcarTramo(Number(s.dataset.tramo))));
+  p.querySelectorAll("[data-dato]").forEach((inp) => (inp.oninput = () => { d[inp.dataset.dato] = inp.value; cambio(); }));
+  p.querySelector("[data-fecha]")?.addEventListener("input", (e) => { MD.m.fecha = e.target.value; cambio(); });
+  p.querySelectorAll("[data-geo]").forEach((inp) => (inp.oninput = () => {
+    const [i, k] = inp.dataset.geo.split(":");
+    d.tramos[Number(i)][k] = inp.value;
+    cambio();
+  }));
+  $("#med-borrar")?.addEventListener("click", async () => {
+    if (!confirm("¿Borrar esta medición? No se puede deshacer.")) return;
+    try {
+      if (!MD.m.nueva) await S.api.borrarMedicion(MD.m.id);
+      quitarBorrador(MD.m.id);
+      aviso("Medición borrada");
+      const o = MD.o, t = MD.m.tipo; MD.m = null;
+      abrirMediciones(o, t);
+    } catch (e) { aviso(sinRed(e) ? "Sin conexión: para borrar una medición hace falta señal." : e.message, true); }
+  });
+}
+
+async function guardarMedicionActual() {
+  const m = MD.m, r = calcularVerticalidad(m.datos);
+  const b = $("#med-guardar");
+  b.disabled = true;
+  const fila = { id: m.id, estructura_id: m.estructura_id, tipo: m.tipo, fecha: m.fecha || hoy(), datos: m.datos,
+    resultado: { cumple: r.cumple, max_cm: r.max, tolerancia_cm: r.tol, completo: r.completo } };
+  try {
+    await S.api.guardarMedicion(fila);
+    quitarBorrador(m.id);
+    m.nueva = false; m.cambiado = false; m.resultado = fila.resultado;
+    if (esperando().some((p) => p.op === "guardarMedicion" && p.args[0].id === m.id)) m.pendiente = true;
+    else aviso(r.cumple == null ? "Medición guardada (faltan lecturas)" : `Medición guardada: ${r.cumple ? "cumple" : "no cumple"}`);
+    pintarMedicion();
+  } catch (e) { aviso(e.message, true, 9000); b.disabled = false; }
+}
+
+// ---- Excel: se rellena la planilla original (plantillas/verticalidad-monopolo.xlsx) sin tocar su formato,
+// fórmulas ni gráfico; Excel recalcula al abrir y además se dejan escritos los resultados.
+const colNum = (ref) => [...ref.match(/^[A-Z]+/)[0]].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+function ponerCelda(hoja, ref, v) {
+  const xml = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const re = new RegExp(`<c r="${ref}"((?:\\s+[a-z:]+="[^"]*")*)\\s*(?:/>|>([\\s\\S]*?)</c>)`);
+  const m = hoja.match(re);
+  let attrs = m ? m[1].replace(/\s+t="[^"]*"/, "") : "";
+  const f = m?.[2]?.match(/<f>[\s\S]*?<\/f>/)?.[0] || "";
+  let cel;
+  if (f) cel = v == null ? `<c r="${ref}"${attrs}>${f}</c>` : typeof v === "number" ? `<c r="${ref}"${attrs}>${f}<v>${v}</v></c>` : `<c r="${ref}"${attrs} t="str">${f}<v>${xml(v)}</v></c>`;
+  else if (v == null || v === "") cel = `<c r="${ref}"${attrs}/>`;
+  else if (typeof v === "number") cel = `<c r="${ref}"${attrs}><v>${v}</v></c>`;
+  else cel = `<c r="${ref}"${attrs} t="inlineStr"><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
+  if (m) return hoja.replace(m[0], cel);
+  const fila = ref.match(/\d+$/)[0];
+  const rm = hoja.match(new RegExp(`<row r="${fila}"[^>]*?(?:/>|>([\\s\\S]*?)</row>)`));
+  if (!rm) return hoja; // fila inexistente en la planilla: no se escribe
+  if (rm[0].endsWith("/>")) return hoja.replace(rm[0], rm[0].replace(/\s*\/>$/, `>${cel}</row>`));
+  const sig = [...rm[1].matchAll(/<c r="([A-Z]+)\d+"/g)].find((x) => colNum(x[1]) > colNum(ref));
+  const dentro = sig ? rm[1].replace(new RegExp(`<c r="${sig[1]}${fila}"`), `${cel}<c r="${sig[1]}${fila}"`) : rm[1] + cel;
+  return hoja.replace(rm[0], rm[0].replace(rm[1], dentro));
+}
+async function exportarVerticalidad(m, o, boton) {
+  const original = boton?.textContent;
+  if (boton) { boton.disabled = true; boton.textContent = "Armando…"; }
+  try {
+    const XLSX = await prepararExcel();
+    const resp = await fetch("plantillas/verticalidad-monopolo.xlsx");
+    if (!resp.ok) throw new Error("no se encontró la planilla");
+    const zip = XLSX.CFB.read(new Uint8Array(await resp.arrayBuffer()), { type: "buffer" });
+    const leer = (n) => new TextDecoder().decode(XLSX.CFB.find(zip, "/" + n).content);
+    const poner = (n, t) => { const e = XLSX.CFB.find(zip, "/" + n); e.content = new TextEncoder().encode(t); e.size = e.content.length; };
+    const d = m.datos, r = calcularVerticalidad(d);
+    let h = leer("xl/worksheets/sheet1.xml");
+    const fechaTxt = m.fecha ? fecha(String(m.fecha).slice(0, 10)) : "";
+    const textos = { D3: fechaTxt, D4: d.radiobase, D5: d.departamento, F8: d.instrumento, E9: d.observaciones,
+      E11: d.licitacion, E12: d.empresa, E13: d.representante, E14: d.firma };
+    for (const [ref, v] of Object.entries(textos)) h = ponerCelda(h, ref, v || null);
+    h = ponerCelda(h, "B7", numeroCampo(d.altura));
+    // lecturas: 5 tramos por lado (filas 20–24 y 30–34), ° ′ ″ izquierda (B–D) y derecha (E–G), ancho y altura (H, I)
+    const filaDe = { lado1: 20, lado2: 30 };
+    for (const lado of LADOS) d.tramos.slice(0, 5).forEach((t, i) => {
+      const f = filaDe[lado] + i, l = d[lado][i];
+      ["B", "C", "D"].forEach((c, k) => (h = ponerCelda(h, c + f, numeroCampo(l.iz[k]))));
+      ["E", "F", "G"].forEach((c, k) => (h = ponerCelda(h, c + f, numeroCampo(l.de[k]))));
+      h = ponerCelda(h, "H" + f, numeroCampo(t.ancho));
+      h = ponerCelda(h, "I" + f, numeroCampo(t.altura));
+    });
+    // resultados ya calculados (por si el programa que lo abre no recalcula)
+    const xs = r.filas.map((x) => x.x), ys = r.filas.map((x) => x.y);
+    for (let i = 0; i < 5; i++) {
+      h = ponerCelda(h, "O" + (20 + i), xs[i] ?? null); h = ponerCelda(h, "O" + (30 + i), ys[i] ?? null);
+      h = ponerCelda(h, "C" + (40 + i), xs[i] ?? null); h = ponerCelda(h, "D" + (40 + i), ys[i] ?? null);
+      h = ponerCelda(h, "E" + (40 + i), r.filas[i]?.r ?? null);
+    }
+    h = ponerCelda(h, "I41", r.tol);
+    // φ izq, φ der, φ med y Δφ med, igual que las fórmulas de la planilla (sin acomodar el paso por 0°)
+    for (const lado of LADOS) {
+      const f0 = filaDe[lado], k = d[lado].map((l) => aDecimal(l.iz)), l = d[lado].map((x) => aDecimal(x.de));
+      const med = k.map((v, i) => (v != null && l[i] != null ? (v + l[i]) / 2 : null));
+      for (let i = 0; i < 5; i++) {
+        h = ponerCelda(h, "K" + (f0 + i), k[i] ?? null); h = ponerCelda(h, "L" + (f0 + i), l[i] ?? null);
+        h = ponerCelda(h, "M" + (f0 + i), med[i] ?? null);
+        if (i > 0) h = ponerCelda(h, "N" + (f0 + i), med[i] != null && med[0] != null ? med[i] - med[0] : null);
+      }
+    }
+    // verificación de puesta a plomo: alturas (fila 48 / columna B), x e y de cada tramo, y la inclinación entre cada par
+    const alt = d.tramos.slice(0, 5).map((t) => numeroCampo(t.altura));
+    const cols = ["F", "G", "H", "I", "J"];
+    for (let j = 0; j < 5; j++) {
+      if (j > 0) h = ponerCelda(h, cols[j] + 48, alt[j]);
+      h = ponerCelda(h, cols[j] + 49, ys[j] ?? null); h = ponerCelda(h, cols[j] + 50, xs[j] ?? null);
+      h = ponerCelda(h, "B" + (52 + j), alt[j]); h = ponerCelda(h, "C" + (52 + j), xs[j] ?? null); h = ponerCelda(h, "D" + (52 + j), ys[j] ?? null);
+    }
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
+      if (i === j) continue;
+      const hj = j === 0 ? 0 : alt[j];
+      const ok = [xs[i], ys[i], xs[j], ys[j], alt[i], hj].every((v) => v != null) && alt[i] !== hj;
+      h = ponerCelda(h, cols[j] + (52 + i), ok ? Math.abs(Math.hypot(xs[i] - xs[j], ys[i] - ys[j]) / (alt[i] - hj)) : null);
+    }
+    // fórmulas sin un resultado calculado acá: se borra el viejo (#DIV/0!) para que no se vea hasta que recalcule
+    h = h.replace(/<c r="([A-Z]+\d+)"((?:\s+[a-z:]+="[^"]*")*)>(<f>[\s\S]*?<\/f>)<v>[^<]*<\/v><\/c>/g, (todo, ref, at, f) =>
+      /\st="e"/.test(at) ? `<c r="${ref}"${at.replace(/\s+t="[^"]*"/, "")}>${f}</c>` : todo);
+    poner("xl/worksheets/sheet1.xml", h);
+    // el gráfico guarda una copia de los valores: se actualiza también
+    let g = leer("xl/charts/chart1.xml");
+    const serie = (ref, vals) => {
+      g = g.replace(new RegExp(`(<c:f>${ref.replace(/\$/g, "\\$")}</c:f><c:numCache>[\\s\\S]*?<c:ptCount val="\\d+"\\s*/>)([\\s\\S]*?)(</c:numCache>)`),
+        (t, a, b, c) => a + vals.map((v, i) => (v == null ? "" : `<c:pt idx="${i}"><c:v>${v}</c:v></c:pt>`)).join("") + c);
+    };
+    serie("Monopolo!$O$20:$O$24", xs.slice(0, 5)); serie("Monopolo!$O$30:$O$34", ys.slice(0, 5));
+    const hs = d.tramos.slice(0, 5).map((t) => numeroCampo(t.altura));
+    serie("Monopolo!$I$20:$I$24", hs); serie("Monopolo!$I$30:$I$34", hs);
+    poner("xl/charts/chart1.xml", g);
+    const bytes = XLSX.CFB.write(zip, { fileType: "zip", type: "array" });
+    const nombre = `verticalidad-${String(o.codigo || "monopolo").replace(/[^\w-]+/g, "")}-${String(m.fecha || hoy()).slice(0, 10)}.xlsx`;
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: nombre });
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    aviso("Planilla lista: se descargó " + nombre);
+  } catch (e) {
+    aviso("No se pudo armar la planilla: " + (sinRed(e) ? "sin conexión (abrí la planilla una vez con señal para que quede guardada)" : e.message), true, 9000);
+  } finally {
+    if (boton) { boton.disabled = false; boton.textContent = original; }
+  }
+}

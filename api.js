@@ -144,6 +144,20 @@ async function crearNeon() {
       await editarCapa(tipo, id, cambios, "Guardar datos");
     },
     async adminUsuarios() { return chequear(await neon.rpc("admin_usuarios"), "Usuarios"); },
+    // Mediciones de campo: verticalidad, tensión de riendas (sql/parte25_mediciones.sql)
+    async mediciones(estructuraId) {
+      const { data, error } = await neon.rpc("mediciones_de", { p_estructura: estructuraId });
+      if (error) throw new Error(/mediciones_de|schema cache|could not find/i.test(error.message)
+        ? "Falta preparar la base para las mediciones: corré sql/parte25_mediciones.sql en Neon y tocá Refresh schema cache." : "Mediciones: " + error.message);
+      return data || [];
+    },
+    async guardarMedicion(m) {
+      const { error } = await neon.rpc("guardar_medicion", { p_id: m.id, p_estructura: m.estructura_id, p_tipo: m.tipo,
+        p_fecha: m.fecha || null, p_datos: m.datos, p_resultado: m.resultado || null });
+      if (error) throw new Error(/guardar_medicion|schema cache|could not find/i.test(error.message)
+        ? "Falta preparar la base para las mediciones: corré sql/parte25_mediciones.sql en Neon y tocá Refresh schema cache." : "Guardar medición: " + error.message);
+    },
+    async borrarMedicion(id) { chequear(await neon.rpc("borrar_medicion", { p_id: id }), "Borrar medición"); },
     hayCarpetasDrive: !!DRIVE_CARPETAS_URL,
     async carpetaDrive(codigo) {
       const token = (await neon.auth.getSession())?.data?.session?.token;
@@ -265,6 +279,7 @@ function crearDemo() {
     { id: 4, tx: 100, cuando: hace(1500), usuario: "Ana", usuario_id: "u-ana", tipo: "cuaderno", objeto_id: 9, codigo: "GDA", detalle: "Visita: falta la puesta a tierra", padre_tipo: "estructura", padre_id: 3, op: "INSERT",
       antes: null, despues: { tipo: "VISITA", texto: "Visita: falta la puesta a tierra" }, deshecho: true, deshecho_por: "Gonza", deshecho_cuando: hace(1400) },
   ];
+  const mediciones = [];
   let hid = 1, cid = 1;
   const hitos = [], cuaderno = [];
   for (const [tipo, lista] of [["estructura", est], ["obra", obr]]) {
@@ -331,6 +346,14 @@ function crearDemo() {
     async perfil() { await espera(); return structuredClone(yo); },
     async elegirMiDO(ini) { await espera(); yo.iniciales_do = ini; Object.assign(cuentas.find((c) => c.user_id === "demo"), { iniciales_do: ini }); },
     async adminUsuarios() { await espera(); return structuredClone(cuentas); },
+    async mediciones(eid) { await espera(); return structuredClone(mediciones.filter((m) => m.estructura_id === eid)).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))); },
+    async guardarMedicion(m) {
+      await espera();
+      const i = mediciones.findIndex((x) => x.id === m.id);
+      const fila = { ...structuredClone(m), autor: "Gonza", autor_id: "demo", modificado: new Date().toISOString() };
+      if (i >= 0) mediciones[i] = { ...mediciones[i], ...fila }; else mediciones.push({ ...fila, creado: new Date().toISOString() });
+    },
+    async borrarMedicion(id) { await espera(); const i = mediciones.findIndex((x) => x.id === id); if (i >= 0) mediciones.splice(i, 1); },
     hayCarpetasDrive: true,
     async carpetaAPapelera() { await espera(); return { ok: true }; },
     async carpetaDrive(codigo) { await espera(); return { url: `https://drive.google.com/drive/folders/demo-${encodeURIComponent(codigo)}`, nueva: true }; },
