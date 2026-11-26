@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-7";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-8";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5728,11 +5728,31 @@ function editarMedicion(m) {
   pintarMedicion();
 }
 
+// Al volver a dibujar la misma pantalla (agregar o quitar una fila, cambiar el perfil…) se queda donde estaba
+function guardarScroll(p, clave) {
+  const c = p.querySelector(".med-cuerpo");
+  return c && p.dataset.vista === clave ? c.scrollTop : 0;
+}
+function volverAlScroll(p, clave, y) {
+  p.dataset.vista = clave;
+  const c = p.querySelector(".med-cuerpo");
+  if (c && y) c.scrollTop = y;
+}
+// después de agregar una fila: el cursor en su primera casilla, sin que la pantalla salte
+function enfocarFilaNueva(p, clave) {
+  const filas = p.querySelectorAll(`[data-tabla="${clave}"] tbody tr`);
+  const inp = filas[filas.length - 1]?.querySelector("input");
+  if (!inp) return;
+  inp.focus({ preventScroll: true });
+  inp.scrollIntoView({ block: "nearest" });
+}
+
 function pintarMedicion() {
   const p = pantallaMedicion(), m = MD.m, o = MD.o, d = m.datos;
   const r = calcularMedicion(m);
   const puede = editor();
   const pest = pestanasDe(m), k = MD.pestana;
+  const vista = `med:${m.id}:${k}`, y = guardarScroll(p, vista);
   const cuerpo = k === "datos" ? datosHtml(m, puede)
     : k === "resultado" ? (m.tipo === "verticalidad_monopolo" ? resultadoHtml(r, d) : m.tipo === "verticalidad_mastil" ? resultadoMastilHtml(r) : resultadoTensionHtml(r))
     : m.tipo === "verticalidad_monopolo" ? ladoHtml(k, d, r, puede)
@@ -5745,6 +5765,7 @@ function pintarMedicion() {
     <footer class="med-pie" id="med-pie">${pieHtml(m, r)}</footer>`;
   p.querySelector("[data-volver]").onclick = () => { guardarBorrador(); abrirMediciones(o, m.tipo); };
   p.querySelectorAll("[data-pest]").forEach((b) => (b.onclick = () => { MD.pestana = b.dataset.pest; pintarMedicion(); }));
+  volverAlScroll(p, vista, y);
   $("#med-excel").onclick = (ev) => exportarMedicion(m, o, ev.currentTarget);
   $("#med-guardar")?.addEventListener("click", guardarMedicionActual);
   $("#med-pie").onclick = () => { if (MD.pestana !== "resultado") { MD.pestana = "resultado"; pintarMedicion(); } };
@@ -6055,7 +6076,9 @@ function enlazarMedicion(p, m) {
     else d[clave][Number(i)][k] = inp.value;
     cambio();
   }));
-  p.querySelectorAll("[data-agregar]").forEach((b) => (b.onclick = () => { cambiarFilas(m, b.dataset.agregar, "agregar"); guardarBorrador(); pintarMedicion(); }));
+  p.querySelectorAll("[data-agregar]").forEach((b) => (b.onclick = () => {
+    cambiarFilas(m, b.dataset.agregar, "agregar"); guardarBorrador(); pintarMedicion(); enfocarFilaNueva($("#medicion"), b.dataset.agregar);
+  }));
   p.querySelectorAll("[data-quitar]").forEach((b) => (b.onclick = () => {
     const [clave, i] = b.dataset.quitar.split(":");
     if (!confirm("¿Quitar esta fila? Se borran también sus lecturas.")) return;
@@ -6176,6 +6199,7 @@ function perfilDesdeMedicion(m) {
 }
 function editarPerfil(pf, volver) {
   const p = pantallaMedicion(), d = pf.datos, puede = editor(), dis = puede ? "" : "disabled";
+  const vista = `perfil:${pf.id}`, y = guardarScroll(p, vista);
   const campo = (k, t, extra = "") => `<label>${t}<input data-pd="${k}" value="${esc(d[k] ?? "")}" ${dis} ${extra}></label>`;
   p.innerHTML = `${barraMed(pf.nuevo ? "Perfil nuevo" : esc(pf.nombre), "Perfiles", puede ? `<button class="boton boton-primario boton-chico" type="button" id="pf-guardar">Guardar</button>` : "")}
     <div class="med-cuerpo"><div class="form med-datos">
@@ -6192,6 +6216,7 @@ function editarPerfil(pf, volver) {
       ${puede && !pf.nuevo && S.perfil?.admin ? `<button class="boton boton-peligro" type="button" id="pf-borrar">Borrar este perfil</button>` : ""}
       ${puede && !pf.nuevo ? `<button class="boton" type="button" id="pf-duplicar">Duplicar (para otra marca o altura)</button>` : ""}
     </div></div>`;
+  volverAlScroll(p, vista, y);
   p.querySelector("[data-volver]").onclick = volver;
   p.querySelectorAll("[data-pd]").forEach((i) => (i.oninput = () => (d[i.dataset.pd] = i.value)));
   p.querySelector("[data-pd-anclajes]")?.addEventListener("input", (e) => (d.anclajes = e.target.value.split(/[,;\s]+/).filter(Boolean).slice(0, 3)));
@@ -6201,6 +6226,7 @@ function editarPerfil(pf, volver) {
     const c = b.dataset.agregar, ult = d[c].at(-1) || {};
     d[c].push(c === "tramos" ? { nombre: String(d[c].length + 1), ancho: "", altura: "" } : c === "niveles" ? { altura: "", A: ult.A ?? "" } : { nombre: String(d[c].length + 1), tipo: ult.tipo || "", nominal: ult.nominal ?? "" });
     editarPerfil(pf, volver);
+    enfocarFilaNueva(p, c);
   }));
   p.querySelectorAll("[data-quitar]").forEach((b) => (b.onclick = () => { const [c, n] = b.dataset.quitar.split(":"); d[c].splice(Number(n), 1); editarPerfil(pf, volver); }));
   $("#pf-duplicar")?.addEventListener("click", () => editarPerfil({ ...structuredClone(pf), id: nuevoId(), nombre: `${pf.nombre} (copia)`, nuevo: true }, volver));
