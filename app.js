@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-17";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-18";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
