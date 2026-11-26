@@ -1,4 +1,4 @@
-import { crearApi } from "./api.js?v=2026-11-26-2";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-5";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5402,22 +5402,23 @@ function dibujarMedida() {
 iniciar();
 
 // ------------------------------------------------------------ mediciones de campo (verticalidad, tensión de riendas)
-// Pantalla completa para cargar en el lugar las lecturas del teodolito (° ′ ″) y ver al instante si cumple.
-// Se guardan en Neon (tabla «mediciones», sql/parte25), vinculadas a la estructura; mientras se cargan quedan
-// como borrador en el dispositivo y, sin señal, se suben solas después (como el resto de los cambios).
+// Pantalla completa para cargar en el lugar las lecturas y ver al instante si cumple.
+// - Cada medición se guarda en Neon (tabla «mediciones», sql/parte25), vinculada a la estructura; mientras se
+//   carga queda como borrador en el dispositivo y, sin señal, se sube sola después.
+// - Los perfiles (sql/parte26) son los modelos de estructura (marca y altura): qué planilla usa y sus datos
+//   (tramos, niveles, riendas). Se crean y se cambian desde la web. Cada medición copia los datos del perfil y
+//   después se ajustan los del sitio; la próxima medición de esa estructura arranca con los de la anterior.
 const MED_TIPO = {
-  verticalidad_monopolo: { titulo: "Verticalidad", lista: true },
-  verticalidad_mastil: { titulo: "Verticalidad de mástil", lista: false },
-  tension_riendas: { titulo: "Tensión de riendas", lista: false },
+  verticalidad_monopolo: { titulo: "Verticalidad", estructura: "monopolo" },
+  verticalidad_mastil: { titulo: "Verticalidad", estructura: "mastil" },
+  tension_riendas: { titulo: "Tensión de riendas", estructura: "mastil" },
 };
-// Planilla del monopolo de 40 m (MP40): ancho del fuste y altura de cada punto leído
-const TRAMOS_MP40 = [
-  { nombre: "1", ancho: 134, altura: 0 }, { nombre: "2", ancho: 116, altura: 900 }, { nombre: "3", ancho: 97.3, altura: 1834 },
-  { nombre: "4", ancho: 75.5, altura: 2872 }, { nombre: "Tope", ancho: 50.6, altura: 4000 },
-];
+// lugares que tiene cada planilla (si un perfil tiene más, el Excel muestra solo estos)
+const MAX_FILAS = { monopolo: 5, mastil: 9, riendas: 10 };
 const LADOS = ["lado1", "lado2"];
 const CLAVE_BORRADORES = "obras-oici-mediciones-v1" + (DEMO ? "-demo" : "");
-const MD = { m: null, o: null, pestana: "lado1", tramo: 0, lista: [] };
+const CLAVE_PERFILES = "obras-oici-perfiles-v1" + (DEMO ? "-demo" : "");
+const MD = { m: null, o: null, pestana: "", tramo: 0, lista: [], perfiles: null, perfilesFalta: false };
 
 const numeroCampo = (v) => (v === "" || v == null ? null : Number(String(v).replace(",", ".")));
 const aDecimal = (g) => {
@@ -5426,28 +5427,91 @@ const aDecimal = (g) => {
   if (a == null) return null;
   return a + (b || 0) / 60 + (c || 0) / 3600;
 };
-const alturaTotalDe = (o) => {
+const alturaMetros = (o) => {
   const m = String(o.estructura || "").match(/\d+(?:[.,]\d+)?/);
-  return m ? Math.round(Number(m[0].replace(",", ".")) * 100) : null;
+  return m ? Number(m[0].replace(",", ".")) : null;
 };
-function nuevaMedicion(o, tipo) {
-  const h = alturaTotalDe(o);
-  return {
-    id: crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    estructura_id: o.id, tipo, fecha: hoy(), nueva: true,
-    datos: {
-      radiobase: o.codigo || "", departamento: (departamentoDe(Number(o.lat), Number(o.lon)) || "").toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()),
-      altura: h || 4000, instrumento: "", observaciones: "", licitacion: o.licitacion || "", empresa: "", representante: "", firma: "",
-      tramos: h === 4000 || !h ? structuredClone(TRAMOS_MP40) : TRAMOS_MP40.map((t, i) => ({ nombre: t.nombre, ancho: null, altura: i === 0 ? 0 : i === TRAMOS_MP40.length - 1 ? h : null })),
-      lado1: TRAMOS_MP40.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })),
-      lado2: TRAMOS_MP40.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })),
-    },
-  };
+const nuevoId = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const tipoEstructura = (o) => (forma("estructura", o) === "circulo" ? "monopolo" : "mastil");
+
+// ---- perfiles
+async function cargarPerfiles(forzar) {
+  if (MD.perfiles && !forzar) return MD.perfiles;
+  try {
+    MD.perfiles = await S.api.perfiles();
+    MD.perfilesFalta = false;
+    escribirJSON(CLAVE_PERFILES, MD.perfiles);
+  } catch (e) {
+    MD.perfilesFalta = e.message === "FALTA_PARTE26";
+    MD.perfiles = leerJSON(CLAVE_PERFILES) || structuredClone(PERFILES_BASE);
+  }
+  return MD.perfiles;
+}
+// el perfil que más le corresponde a una estructura: el de su tipo con la misma altura, o el primero de su tipo
+function perfilSugerido(o, perfiles) {
+  const t = tipoEstructura(o), h = alturaMetros(o);
+  const delTipo = perfiles.filter((p) => p.tipo === t);
+  return delTipo.find((p) => h != null && Number(p.datos.altura_m) === h) || delTipo[0] || null;
 }
 
-// Cálculo, igual que la planilla: φ med = punto medio entre los bordes izquierdo y derecho; el desplazamiento de
-// cada tramo es sen(Δφ med) / sen(φ der − φ izq) × ancho, respecto del tramo 1. Las lecturas que pasan por 0°/360°
-// se acomodan antes (la planilla da lo mismo porque lo hace igual en todos los tramos).
+// ---- datos de una medición nueva, desde el perfil (o desde la medición anterior de la misma estructura)
+function filasDePerfil(tipo, perfil, o) {
+  const d = perfil?.datos || {};
+  if (tipo === "verticalidad_monopolo") {
+    const h = alturaMetros(o);
+    const tramos = d.tramos?.length ? structuredClone(d.tramos)
+      : ["1", "2", "3", "4", "Tope"].map((nombre, i) => ({ nombre, ancho: null, altura: i === 0 ? 0 : i === 4 && h ? h * 100 : null }));
+    return { altura: d.altura_m ? d.altura_m * 100 : h ? h * 100 : "", tramos,
+      lado1: tramos.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })), lado2: tramos.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })) };
+  }
+  if (tipo === "verticalidad_mastil") return {
+    medio_parante: d.medio_parante ?? "", desplome_admisible: d.desplome_admisible ?? "",
+    niveles: (d.niveles || []).map((n) => ({ altura: n.altura, A: n.A, D: ["", "", ""] })),
+  };
+  return {
+    tolerancia: d.tolerancia ?? 30,
+    anclajes: (d.anclajes?.length ? d.anclajes : ["A", "B", "C"]).map((nombre) => ({
+      nombre, riendas: (d.riendas || []).map((r) => ({ nombre: r.nombre, tipo: r.tipo, nominal: r.nominal, L: ["", "", ""] })) })),
+  };
+}
+function nuevaMedicion(o, tipo, perfil, anterior) {
+  const dep = (departamentoDe(Number(o.lat), Number(o.lon)) || "").toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase());
+  const h = perfil?.datos?.altura_m || alturaMetros(o);
+  const comunes = { perfil_id: perfil?.id || null, perfil_nombre: perfil?.nombre || "", fabricante: perfil?.datos?.fabricante || "",
+    radiobase: o.codigo || "", estacion: o.codigo || "", departamento: dep, altura_txt: h ? `${numero(h, 0)} mts` : "",
+    instrumento: "", observaciones: "", licitacion: o.licitacion || "", empresa: "", representante: "", firma: "",
+    responsable: "", vencimiento: "", viento: "" };
+  let datos = { ...comunes, ...filasDePerfil(tipo, perfil, o) };
+  // la medición anterior de esta estructura trae los datos del sitio (sin las lecturas)
+  if (anterior) {
+    const a = structuredClone(anterior.datos);
+    for (const k of ["instrumento", "empresa", "representante", "firma", "responsable", "vencimiento", "observaciones"]) delete a[k];
+    a.lado1?.forEach((l) => (l.iz = ["", "", ""], l.de = ["", "", ""]));
+    a.lado2?.forEach((l) => (l.iz = ["", "", ""], l.de = ["", "", ""]));
+    a.niveles?.forEach((n) => (n.D = ["", "", ""]));
+    a.anclajes?.forEach((an) => an.riendas.forEach((r) => (r.L = ["", "", ""])));
+    datos = { ...datos, ...a, instrumento: anterior.datos.instrumento || "", empresa: anterior.datos.empresa || "",
+      representante: anterior.datos.representante || "", responsable: anterior.datos.responsable || "" };
+  }
+  return { id: nuevoId(), estructura_id: o.id, tipo, fecha: hoy(), nueva: true, datos };
+}
+// cambiar el perfil de una medición: se reemplazan los datos del modelo y se conservan las lecturas por posición
+function aplicarPerfil(m, perfil, o) {
+  const viejo = m.datos, nuevo = filasDePerfil(m.tipo, perfil, o);
+  if (m.tipo === "verticalidad_monopolo") nuevo.tramos.forEach((t, i) => {
+    if (viejo.lado1?.[i]) nuevo.lado1[i] = viejo.lado1[i];
+    if (viejo.lado2?.[i]) nuevo.lado2[i] = viejo.lado2[i];
+  });
+  if (m.tipo === "verticalidad_mastil") nuevo.niveles.forEach((n, i) => { if (viejo.niveles?.[i]) n.D = viejo.niveles[i].D; });
+  if (m.tipo === "tension_riendas") nuevo.anclajes.forEach((a, i) => a.riendas.forEach((r, j) => { const v = viejo.anclajes?.[i]?.riendas?.[j]; if (v) r.L = v.L; }));
+  const h = perfil.datos?.altura_m;
+  Object.assign(m.datos, nuevo, { perfil_id: perfil.id, perfil_nombre: perfil.nombre, fabricante: perfil.datos?.fabricante || m.datos.fabricante,
+    altura_txt: h ? `${numero(h, 0)} mts` : m.datos.altura_txt });
+}
+
+// ---- cálculos
+// Monopolo, igual que su planilla: φ med = punto medio entre los bordes; el desplazamiento de cada tramo es
+// sen(Δφ med) / sen(φ der − φ izq) × ancho, respecto del tramo 1 (las lecturas que pasan por 0°/360° se acomodan).
 function desplazamientos(lado, tramos) {
   const medios = lado.map((l) => {
     const iz = aDecimal(l.iz), de0 = aDecimal(l.de);
@@ -5460,10 +5524,11 @@ function desplazamientos(lado, tramos) {
   const base = medios[0];
   return medios.map((m, i) => {
     if (i === 0) return m ? 0 : null;
-    if (!m || !base || !tramos[i]?.ancho || Math.abs(Math.sin((m.ang * Math.PI) / 180)) < 1e-9) return null;
+    const ancho = numeroCampo(tramos[i]?.ancho);
+    if (!m || !base || !ancho || Math.abs(Math.sin((m.ang * Math.PI) / 180)) < 1e-9) return null;
     let dj = m.medio - base.medio;
     dj = ((((dj + 180) % 360) + 360) % 360) - 180;
-    return (Math.sin((dj * Math.PI) / 180) / Math.sin((m.ang * Math.PI) / 180)) * Number(tramos[i].ancho);
+    return (Math.sin((dj * Math.PI) / 180) / Math.sin((m.ang * Math.PI) / 180)) * ancho;
   });
 }
 function calcularVerticalidad(d) {
@@ -5475,7 +5540,6 @@ function calcularVerticalidad(d) {
   const tol = numeroCampo(d.altura) ? numeroCampo(d.altura) / 200 : null;
   const conR = filas.filter((f) => f.r != null);
   const max = conR.length ? Math.max(...conR.map((f) => f.r)) : null;
-  // inclinación entre tramos seguidos (como «Verificación de puesta a plomo»)
   let incl = null;
   for (let i = 1; i < filas.length; i++) {
     const a = filas[i - 1], b = filas[i];
@@ -5485,6 +5549,80 @@ function calcularVerticalidad(d) {
   }
   const completo = conR.length === filas.length && filas.length > 1;
   return { filas, tol, max, incl, completo, cumple: max != null && tol != null ? max <= tol : null };
+}
+// Mástil, igual que su planilla: d = (D1+D2+D3)/3; e = d·√3/A; α = arcsen(e) (giro respecto de la base);
+// x = (D2−D3)/√3; y = (2·D1−D2−D3)/3; r = √(x²+y²) (desplome). Tolerancias de la planilla:
+// α ≤ 5° en total; entre dos puntos a 3 m, no más de 0,5° (se toma proporcional a la distancia);
+// desplome entre dos puntos ≤ 0,25 % de su separación vertical; y el desplome máximo admisible si se cargó.
+// lecturas en cm o en «medios parantes» (como la columna «completar en sitio» de la planilla)
+const factorMastil = (d) => (d.unidad === "parante" ? numeroCampo(d.medio_parante) || null : 1);
+function calcularMastil(d) {
+  const fac = factorMastil(d);
+  const filas = d.niveles.map((n) => {
+    const [D1, D2, D3] = n.D.map((v) => (numeroCampo(v) == null || fac == null ? null : numeroCampo(v) * fac)), A = numeroCampo(n.A), h = numeroCampo(n.altura);
+    if ([D1, D2, D3].some((v) => v == null || isNaN(v))) return { h, A, falta: true };
+    const dm = (D1 + D2 + D3) / 3, e = A ? (dm * Math.sqrt(3)) / A : null;
+    const a = e != null && Math.abs(e) <= 1 ? (Math.asin(e) * 180) / Math.PI : null;
+    const x = (D2 - D3) / Math.sqrt(3), y = (2 * D1 - D2 - D3) / 3;
+    return { h, A, d: dm, e, a, x, y, r: Math.hypot(x, y) };
+  });
+  const ok = filas.filter((f) => !f.falta);
+  const problemas = [];
+  const aMax = ok.reduce((m, f) => (f.a != null && (m == null || Math.abs(f.a) > Math.abs(m.a)) ? f : m), null);
+  if (ok.some((f) => f.a == null)) problemas.push("hay un nivel con un giro imposible (revisá A y las lecturas)");
+  if (aMax && Math.abs(aMax.a) > 5) problemas.push(`giro de ${numero(aMax.a, 2)}° a ${numero(aMax.h, 1)} m (máx. 5°)`);
+  let giro = null, desp = null;
+  for (let i = 0; i < ok.length; i++) for (let j = i + 1; j < ok.length; j++) {
+    const a = ok[i], b = ok[j], dh = Math.abs(b.h - a.h);
+    if (!dh) continue;
+    if (a.a != null && b.a != null) {
+      const lim = (0.5 * dh) / 3, v = Math.abs(b.a - a.a);
+      if (!giro || v / lim > giro.v / giro.lim) giro = { v, lim, de: a.h, a: b.h };
+    }
+    const ratio = Math.hypot(b.x - a.x, b.y - a.y) / (dh * 100);
+    if (!desp || ratio > desp.v) desp = { v: ratio, de: a.h, a: b.h };
+  }
+  if (giro && giro.v > giro.lim) problemas.push(`giro de ${numero(giro.v, 2)}° entre ${numero(giro.de, 1)} y ${numero(giro.a, 1)} m (máx. ${numero(giro.lim, 2)}°)`);
+  if (desp && desp.v > 0.0025) problemas.push(`desplome del ${numero(desp.v * 100, 2)} % entre ${numero(desp.de, 1)} y ${numero(desp.a, 1)} m (máx. 0,25 %)`);
+  const rMax = ok.length ? Math.max(...ok.map((f) => f.r)) : null;
+  const adm = numeroCampo(d.desplome_admisible);
+  if (adm != null && rMax != null && rMax > adm) problemas.push(`desplome de ${numero(rMax, 1)} cm (admisible ${numero(adm, 1)} cm)`);
+  const completo = ok.length === filas.length && filas.length > 0;
+  return { filas, aMax, giro, desp, rMax, adm, problemas, completo, cumple: ok.length >= 2 ? !problemas.length : null };
+}
+// Tensiones, igual que su planilla: promedio de L1, L2 y L3 y error = (promedio / lectura − 1) × 100,
+// que tiene que quedar dentro de ± la tolerancia (30 %).
+function calcularTension(d) {
+  const tol = numeroCampo(d.tolerancia) ?? 30;
+  const anclajes = d.anclajes.map((a) => ({
+    nombre: a.nombre,
+    riendas: a.riendas.map((r) => {
+      const L = r.L.map(numeroCampo).filter((v) => v != null && !isNaN(v));
+      const nom = numeroCampo(r.nominal);
+      if (!L.length || !nom) return { ...r, prom: null, err: null, completa: false };
+      const prom = L.reduce((s, v) => s + v, 0) / L.length, err = (prom / nom - 1) * 100;
+      return { ...r, prom, err, completa: L.length === 3, bien: Math.abs(err) <= tol };
+    }),
+  }));
+  const todas = anclajes.flatMap((a) => a.riendas.map((r) => ({ ...r, anclaje: a.nombre })));
+  const medidas = todas.filter((r) => r.completa);
+  const fuera = medidas.filter((r) => !r.bien);
+  const peor = medidas.reduce((m, r) => (!m || Math.abs(r.err) > Math.abs(m.err) ? r : m), null);
+  return { anclajes, tol, medidas: medidas.length, total: todas.length, fuera, peor,
+    completo: medidas.length === todas.length && todas.length > 0, cumple: medidas.length ? !fuera.length : null };
+}
+const calcularMedicion = (m) => (m.tipo === "verticalidad_monopolo" ? calcularVerticalidad(m.datos) : m.tipo === "verticalidad_mastil" ? calcularMastil(m.datos) : calcularTension(m.datos));
+function resumenMedicion(m, r) {
+  if (m.tipo === "verticalidad_monopolo") return { cumple: r.cumple, completo: r.completo, max_cm: r.max, tolerancia_cm: r.tol };
+  if (m.tipo === "verticalidad_mastil") return { cumple: r.cumple, completo: r.completo, desplome_max_cm: r.rMax, giro_max: r.aMax?.a ?? null, problemas: r.problemas };
+  return { cumple: r.cumple, completo: r.completo, fuera: r.fuera.length, peor_error: r.peor?.err ?? null, tolerancia: r.tol };
+}
+function textoResumen(m, r) {
+  if (r.cumple == null && !r.max_cm && r.max == null) return "faltan lecturas";
+  if (m.tipo === "verticalidad_monopolo") { const mx = r.max ?? r.max_cm, t = r.tol ?? r.tolerancia_cm; return mx != null ? `máx. ${numero(mx, 1)} cm de ${numero(t, 1)} cm` : "faltan lecturas"; }
+  if (m.tipo === "verticalidad_mastil") { const rr = r.rMax ?? r.desplome_max_cm; return rr != null ? `desplome máx. ${numero(rr, 1)} cm` : "faltan lecturas"; }
+  const f = Array.isArray(r.fuera) ? r.fuera.length : r.fuera;
+  return f ? `${f} rienda${f === 1 ? "" : "s"} fuera de tolerancia` : "todas dentro de tolerancia";
 }
 
 // ---- borradores en el dispositivo
@@ -5500,9 +5638,8 @@ function quitarBorrador(id) { const t = leerBorradores(); delete t[id]; escribir
 // ---- botones en la ficha
 function herramientasHtml(tipo, o) {
   if (tipo !== "estructura") return "";
-  const mono = forma("estructura", o) === "circulo";
   const b = (t, txt) => `<button class="herramienta" type="button" data-medir="${t}">${ICONO.medir}<span>${txt}</span></button>`;
-  return `<div class="herramientas">${mono ? b("verticalidad_monopolo", "Verticalidad")
+  return `<div class="herramientas">${tipoEstructura(o) === "monopolo" ? b("verticalidad_monopolo", "Verticalidad")
     : b("verticalidad_mastil", "Verticalidad") + b("tension_riendas", "Tensión de riendas")}</div>`;
 }
 function enlazarHerramientas(ficha, tipo, o) {
@@ -5527,107 +5664,118 @@ function cerrarMedicion() {
   $("#medicion").hidden = true;
   document.body.classList.remove("con-medicion");
 }
+const barraMed = (titulo, volver, extra = "") => `<header class="med-barra"><button class="boton boton-chico" type="button" data-volver>‹ ${volver}</button>
+  <h2>${titulo}</h2>${extra}</header>`;
 
-// Lista de mediciones de la estructura (y las que quedaron como borrador en este dispositivo)
+// Lista de mediciones de la estructura (con los borradores y las que esperan señal)
 async function abrirMediciones(o, tipo) {
   const p = pantallaMedicion();
-  MD.o = o;
+  MD.o = o; MD.tipo = tipo;
+  cargarPerfiles();
   const def = MED_TIPO[tipo];
-  if (!def.lista) {
-    p.innerHTML = `<header class="med-barra"><button class="boton boton-chico" type="button" data-volver>‹ Volver</button>
-        <h2>${esc(def.titulo)} · ${esc(o.codigo)}</h2></header>
-      <div class="med-cuerpo"><div class="med-vacio">
-        <p><b>${esc(def.titulo)} para mástiles</b></p>
-        <p class="nota">El acceso ya está listo. Falta la planilla de Excel de ${def.titulo.toLowerCase()} para mástiles: cuando la pases, se arma la carga en campo y la exportación, igual que la de los monopolos.</p>
-      </div></div>`;
-    p.querySelector("[data-volver]").onclick = cerrarMedicion;
-    return;
-  }
-  p.innerHTML = `<header class="med-barra"><button class="boton boton-chico" type="button" data-volver>‹ Volver</button>
-      <h2>${esc(def.titulo)} · ${esc(o.codigo)}</h2></header>
+  p.innerHTML = `${barraMed(`${esc(def.titulo)} · ${esc(o.codigo)}`, "Volver", `<button class="boton boton-chico" type="button" id="med-perfiles">Perfiles</button>`)}
     <div class="med-cuerpo">
       ${editor() ? `<button class="boton boton-primario med-nueva" type="button" id="med-nueva">+ Nueva medición</button>` : ""}
       <ul class="med-lista" id="med-lista"><li class="nota">Cargando…</li></ul>
     </div>`;
   p.querySelector("[data-volver]").onclick = cerrarMedicion;
-  $("#med-nueva")?.addEventListener("click", () => editarMedicion(nuevaMedicion(o, tipo)));
+  $("#med-perfiles").onclick = () => abrirPerfiles(tipoEstructura(o), () => abrirMediciones(o, tipo));
   let guardadas = [], aviso_ = "";
   try { guardadas = await S.api.mediciones(o.id); }
   catch (e) { aviso_ = sinRed(e) ? "Sin conexión: se muestran solo las que están en este dispositivo." : e.message; }
   const borr = Object.values(leerBorradores()).filter((m) => m.estructura_id === o.id && m.tipo === tipo);
-  const pend = misPend().filter((p) => p.op === "guardarMedicion" && p.args[0].estructura_id === o.id).map((p) => ({ ...p.args[0], pendiente: true }));
+  const pend = misPend().filter((x) => x.op === "guardarMedicion" && x.args[0].estructura_id === o.id).map((x) => ({ ...x.args[0], pendiente: true }));
   const porId = new Map();
   for (const m of [...guardadas, ...pend, ...borr]) porId.set(m.id, { ...porId.get(m.id), ...m });
-  MD.lista = [...porId.values()].filter((m) => m.tipo === tipo).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+  MD.todas = [...porId.values()];
+  MD.lista = MD.todas.filter((m) => m.tipo === tipo).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)) || String(b.creado || "").localeCompare(String(a.creado || "")));
+  $("#med-nueva")?.addEventListener("click", async () => {
+    const perfiles = await cargarPerfiles();
+    const anterior = MD.lista.find((m) => !m.borrador || m.creado);
+    const perfil = perfiles.find((x) => x.id === anterior?.datos?.perfil_id) || perfilSugerido(o, perfiles);
+    editarMedicion(nuevaMedicion(o, tipo, perfil, anterior));
+  });
   const ul = $("#med-lista");
   if (!ul) return;
   ul.innerHTML = (aviso_ ? `<li class="nota">${esc(aviso_)}</li>` : "") + (MD.lista.length ? MD.lista.map((m) => {
-    const r = m.resultado || calcularVerticalidad(m.datos);
+    const r = m.resultado || resumenMedicion(m, calcularMedicion(m));
     const est = r.cumple == null ? `<span class="med-chip">incompleta</span>` : r.cumple ? `<span class="med-chip si">Cumple</span>` : `<span class="med-chip no">No cumple</span>`;
     return `<li><button type="button" data-abrir="${esc(m.id)}">
         <span><b>${fecha(String(m.fecha).slice(0, 10))}</b> ${est}${m.borrador && !m.creado ? ` <span class="sin-subir">borrador</span>` : m.pendiente ? ` <span class="sin-subir">sin subir</span>` : ""}</span>
-        <small>${(r.max ?? r.max_cm) != null ? `máx. ${numero(r.max ?? r.max_cm, 1)} cm de ${numero(r.tol ?? r.tolerancia_cm, 1)} cm${r.completo === false ? " (faltan tramos)" : ""}` : "faltan lecturas"}${m.autor ? ` · ${esc(m.autor)}` : ""}</small></button></li>`;
+        <small>${esc(textoResumen(m, r))}${m.datos?.perfil_nombre ? ` · ${esc(m.datos.perfil_nombre)}` : ""}${m.autor ? ` · ${esc(m.autor)}` : ""}</small></button></li>`;
   }).join("") : `<li class="nota">Todavía no hay mediciones de esta estructura.${editor() ? " Tocá «Nueva medición» para cargar la primera." : ""}</li>`);
   ul.querySelectorAll("[data-abrir]").forEach((b) => (b.onclick = () => editarMedicion(structuredClone(MD.lista.find((m) => m.id === b.dataset.abrir)))));
 }
 
+function pestanasDe(m) {
+  if (m.tipo === "verticalidad_monopolo") return [["lado1", "Lado 1"], ["lado2", "Lado 2"], ["resultado", "Resultado"], ["datos", "Datos"]];
+  if (m.tipo === "verticalidad_mastil") return [["niveles", "Lecturas"], ["resultado", "Resultado"], ["datos", "Datos"]];
+  return [...m.datos.anclajes.map((a, i) => [`anclaje${i}`, `Anclaje ${a.nombre}`]), ["resultado", "Resultado"], ["datos", "Datos"]];
+}
 function editarMedicion(m) {
   MD.m = m;
-  MD.pestana = MD.pestana === "datos" || MD.pestana === "resultado" ? MD.pestana : "lado1";
-  if (m.nueva) MD.pestana = "lado1";
+  const pest = pestanasDe(m).map((x) => x[0]);
+  if (m.nueva || !pest.includes(MD.pestana)) MD.pestana = pest[0];
   MD.tramo = 0;
   pintarMedicion();
 }
 
 function pintarMedicion() {
   const p = pantallaMedicion(), m = MD.m, o = MD.o, d = m.datos;
-  const r = calcularVerticalidad(d);
+  const r = calcularMedicion(m);
   const puede = editor();
-  const pest = [["lado1", "Lado 1"], ["lado2", "Lado 2"], ["resultado", "Resultado"], ["datos", "Datos"]];
-  p.innerHTML = `<header class="med-barra">
-      <button class="boton boton-chico" type="button" data-volver>‹ Mediciones</button>
-      <h2>Verticalidad · ${esc(o.codigo)}</h2>
-      <button class="boton boton-chico" type="button" id="med-excel" title="Descargar la planilla de verticalidad con estos datos">Excel</button>
-      ${puede ? `<button class="boton boton-primario boton-chico" type="button" id="med-guardar">Guardar</button>` : ""}
-    </header>
-    <nav class="med-pestanas" role="tablist">${pest.map(([k, t]) => `<button type="button" role="tab" data-pest="${k}" aria-selected="${MD.pestana === k}">${t}</button>`).join("")}</nav>
-    <div class="med-cuerpo" id="med-cuerpo">${MD.pestana === "datos" ? datosHtml(d, puede) : MD.pestana === "resultado" ? resultadoHtml(r, d) : ladoHtml(MD.pestana, d, r, puede)}</div>
-    <footer class="med-pie" id="med-pie">${pieHtml(r)}</footer>`;
+  const pest = pestanasDe(m), k = MD.pestana;
+  const cuerpo = k === "datos" ? datosHtml(m, puede)
+    : k === "resultado" ? (m.tipo === "verticalidad_monopolo" ? resultadoHtml(r, d) : m.tipo === "verticalidad_mastil" ? resultadoMastilHtml(r) : resultadoTensionHtml(r))
+    : m.tipo === "verticalidad_monopolo" ? ladoHtml(k, d, r, puede)
+    : m.tipo === "verticalidad_mastil" ? nivelesHtml(d, r, puede) : anclajeHtml(Number(k.slice(7)), d, r, puede);
+  p.innerHTML = `${barraMed(`${esc(MED_TIPO[m.tipo].titulo)} · ${esc(o.codigo)}`, "Mediciones",
+      `<button class="boton boton-chico" type="button" id="med-excel" title="Descargar la planilla con estos datos">Excel</button>
+      ${puede ? `<button class="boton boton-primario boton-chico" type="button" id="med-guardar">Guardar</button>` : ""}`)}
+    <nav class="med-pestanas" role="tablist">${pest.map(([c, t]) => `<button type="button" role="tab" data-pest="${c}" aria-selected="${k === c}">${t}</button>`).join("")}</nav>
+    <div class="med-cuerpo" id="med-cuerpo">${cuerpo}</div>
+    <footer class="med-pie" id="med-pie">${pieHtml(m, r)}</footer>`;
   p.querySelector("[data-volver]").onclick = () => { guardarBorrador(); abrirMediciones(o, m.tipo); };
   p.querySelectorAll("[data-pest]").forEach((b) => (b.onclick = () => { MD.pestana = b.dataset.pest; pintarMedicion(); }));
-  $("#med-excel").onclick = (ev) => exportarVerticalidad(m, o, ev.currentTarget);
+  $("#med-excel").onclick = (ev) => exportarMedicion(m, o, ev.currentTarget);
   $("#med-guardar")?.addEventListener("click", guardarMedicionActual);
   $("#med-pie").onclick = () => { if (MD.pestana !== "resultado") { MD.pestana = "resultado"; pintarMedicion(); } };
-  enlazarMedicion(p, d);
+  enlazarMedicion(p, m);
 }
 
 const fmtCm = (v, dec = 1) => (v == null ? "—" : `${numero(v, dec)} cm`);
-function pieHtml(r) {
-  if (r.cumple == null) {
-    const faltan = r.filas.filter((f) => f.r == null).length;
-    return `<span class="med-chip">${faltan ? `Faltan lecturas en ${faltan} tramo${faltan === 1 ? "" : "s"}` : "Faltan datos"}</span>
-      <span>Tolerancia H/200: ${fmtCm(r.tol)}</span>`;
+const chip = (c) => (c == null ? "" : `<span class="med-chip ${c ? "si" : "no"}">${c ? "Cumple" : "No cumple"}</span>`);
+function pieHtml(m, r) {
+  if (m.tipo === "verticalidad_monopolo") {
+    if (r.cumple == null) {
+      const faltan = r.filas.filter((f) => f.r == null).length;
+      return `<span class="med-chip">${faltan ? `Faltan lecturas en ${faltan} tramo${faltan === 1 ? "" : "s"}` : "Faltan datos"}</span><span>Tolerancia H/200: ${fmtCm(r.tol)}</span>`;
+    }
+    return `${chip(r.cumple)}<span>Desplazamiento máx. <b>${fmtCm(r.max)}</b> · tolerancia ${fmtCm(r.tol)}${r.completo ? "" : " (con los tramos cargados)"}</span>`;
   }
-  return `<span class="med-chip ${r.cumple ? "si" : "no"}">${r.cumple ? "Cumple" : "No cumple"}</span>
-    <span>Desplazamiento máx. <b>${fmtCm(r.max)}</b> · tolerancia ${fmtCm(r.tol)}${r.completo ? "" : " (con los tramos cargados)"}</span>`;
+  if (m.tipo === "verticalidad_mastil") {
+    if (r.cumple == null) return `<span class="med-chip">Faltan lecturas</span><span>Cargá D1, D2 y D3 en al menos dos niveles</span>`;
+    return `${chip(r.cumple)}<span>Desplome máx. <b>${fmtCm(r.rMax)}</b> · giro máx. <b>${r.aMax?.a != null ? numero(r.aMax.a, 2) + "°" : "—"}</b>${r.completo ? "" : " (con los niveles cargados)"}</span>`;
+  }
+  if (r.cumple == null) return `<span class="med-chip">Faltan lecturas</span><span>${r.medidas} de ${r.total} riendas con L1, L2 y L3 · tolerancia ±${numero(r.tol, 0)} %</span>`;
+  return `${chip(r.cumple)}<span>${r.fuera.length ? `<b>${r.fuera.length}</b> fuera de ±${numero(r.tol, 0)} %` : `Todas dentro de ±${numero(r.tol, 0)} %`} · ${r.medidas} de ${r.total} medidas</span>`;
 }
 
-// Esquema: vista de arriba (dónde se para el teodolito) y de costado (qué tramo se está leyendo)
-function esquemaHtml(lado, d, tramo) {
-  const n = d.tramos.length;
-  const alto = 200, base = 186, arriba = 18;
-  const ys = d.tramos.map((t, i) => {
-    const h = numeroCampo(t.altura), H = numeroCampo(d.altura) || numeroCampo(d.tramos[n - 1].altura) || 1;
-    return h != null ? base - ((base - arriba) * h) / H : base - ((base - arriba) * i) / (n - 1);
-  });
+// ---- monopolo: esquema y lecturas en ° ′ ″
+function esquemaCostado(niveles, actual, nombre) {
+  const n = niveles.length, alto = 200, base = 186, arriba = 18;
+  const H = Math.max(...niveles.map((x) => x.h ?? 0), 1);
+  const ys = niveles.map((x, i) => (x.h != null ? base - ((base - arriba) * x.h) / H : base - ((base - arriba) * i) / Math.max(1, n - 1)));
   const ancho = (i) => 6 + 9 * (1 - i / Math.max(1, n - 1));
-  const costado = `<svg viewBox="0 0 120 ${alto}" class="med-costado" aria-label="Monopolo de costado: tramo ${esc(d.tramos[tramo]?.nombre)}">
+  return `<svg viewBox="0 0 120 ${alto}" class="med-costado" aria-label="La estructura de costado: ${esc(nombre)}">
     <line x1="10" y1="${base + 4}" x2="110" y2="${base + 4}" stroke="#666" stroke-width="2"/>
     <path d="M${60 - ancho(0)} ${base} L${60 - ancho(n - 1)} ${arriba} L${60 + ancho(n - 1)} ${arriba} L${60 + ancho(0)} ${base}Z" fill="#3a3a3a" stroke="#888" stroke-width="1"/>
-    ${ys.map((y, i) => `<g class="${i === tramo ? "actual" : ""}"><line x1="${60 - ancho(i) - 6}" y1="${y}" x2="${60 + ancho(i) + 6}" y2="${y}"/>
-      <text x="${60 + ancho(i) + 10}" y="${y + 4}">${esc(d.tramos[i].nombre)}</text></g>`).join("")}
+    ${ys.map((y, i) => `<g class="${i === actual ? "actual" : ""}"><line x1="${60 - ancho(i) - 6}" y1="${y}" x2="${60 + ancho(i) + 6}" y2="${y}"/>
+      <text x="${60 + ancho(i) + 10}" y="${y + 4}" ${i !== actual && i < n - 1 && Math.abs(ys[i + 1] - y) < 11 ? 'opacity="0"' : ""}>${esc(niveles[i].etq)}</text></g>`).join("")}
   </svg>`;
-  // de arriba: el lado 2 queda a 90° del lado 1
+}
+function esquemaHtml(lado, d, tramo) {
+  const costado = esquemaCostado(d.tramos.map((t, i) => ({ h: numeroCampo(t.altura), etq: t.nombre })), tramo, `tramo ${d.tramos[tramo]?.nombre}`);
   const ang = lado === "lado1" ? 90 : 0;
   const tx = 60 + 46 * Math.cos((ang * Math.PI) / 180), ty = 60 + 46 * Math.sin((ang * Math.PI) / 180);
   const otro = lado === "lado1" ? [106, 60] : [60, 106];
@@ -5636,11 +5784,9 @@ function esquemaHtml(lado, d, tramo) {
     <line x1="${tx}" y1="${ty}" x2="60" y2="60" stroke="var(--acento)" stroke-width="1.5" stroke-dasharray="4 3"/>
     <g transform="translate(${tx} ${ty})"><circle r="8" fill="var(--acento-fuerte)" stroke="var(--acento)"/><text y="4" text-anchor="middle" class="t">${lado === "lado1" ? "1" : "2"}</text></g>
     <g transform="translate(${otro[0]} ${otro[1]})" opacity=".45"><circle r="6" fill="none" stroke="#888" stroke-dasharray="2 2"/><text y="3.5" text-anchor="middle" class="t2">${lado === "lado1" ? "2" : "1"}</text></g>
-    <text x="60" y="${lado === "lado1" ? 14 : 116}" text-anchor="middle" class="t2">${lado === "lado1" ? "90° del lado 2" : "90° del lado 1"}</text>
   </svg>`;
   return `<div class="med-esquema">${planta}${costado}</div>`;
 }
-
 function gmsHtml(lado, i, cual, v, puede) {
   const nombres = ["°", "′", "″"], max = [359, 59, 59.9];
   return `<div class="gms" role="group" aria-label="${cual === "iz" ? "Borde izquierdo" : "Borde derecho"}">${v.map((x, k) =>
@@ -5662,31 +5808,127 @@ function ladoHtml(lado, d, r, puede) {
     }).join("")}</div>`;
 }
 
-function datosHtml(d, puede) {
-  const dis = puede ? "" : "disabled";
-  const campo = (k, t, tipo = "text", extra = "") => `<label>${t}<input type="${tipo}" data-dato="${k}" value="${esc(d[k] ?? "")}" ${dis} ${extra}></label>`;
-  return `<div class="form med-datos">
-    <label>Fecha<input type="date" data-fecha value="${esc(String(MD.m.fecha || "").slice(0, 10))}" ${dis}></label>
-    <div class="dos">${campo("radiobase", "Radiobase")}${campo("departamento", "Departamento")}</div>
-    ${campo("altura", "Altura total (cm)", "text", 'inputmode="decimal"')}
-    ${campo("instrumento", "Instrumento y fecha de calibración")}
-    <label>Observaciones<textarea data-dato="observaciones" rows="2" ${dis}>${esc(d.observaciones || "")}</textarea></label>
-    ${campo("licitacion", "Licitación de la inspección")}
-    ${campo("empresa", "Empresa responsable")}
-    ${campo("representante", "Representante técnico")}
-    ${campo("firma", "Firma y n° de Caja Profesional")}
-    <h3>Tramos del monopolo</h3>
-    <p class="nota">Ancho del fuste y altura de cada punto donde se lee, como en la planilla. Vienen los del monopolo de 40 m (MP40); si es otro modelo, cambialos según el plano del fabricante.</p>
-    <table class="med-geo"><thead><tr><th>Tramo</th><th>Ancho (cm)</th><th>Altura (cm)</th></tr></thead><tbody>
-      ${d.tramos.map((t, i) => `<tr><td>${esc(t.nombre)}</td>
-        <td><input inputmode="decimal" data-geo="${i}:ancho" value="${esc(t.ancho ?? "")}" ${dis} aria-label="Ancho del tramo ${esc(t.nombre)}"></td>
-        <td><input inputmode="decimal" data-geo="${i}:altura" value="${esc(t.altura ?? "")}" ${dis} aria-label="Altura del tramo ${esc(t.nombre)}"></td></tr>`).join("")}
+// ---- mástil: D1, D2 y D3 en cada nivel (con signo)
+const campoNum = (attr, v, puede, etq, conSigno = true) => `<label class="med-num"><span>${etq}</span><span class="med-num-caja">
+  ${conSigno ? `<button type="button" class="signo" data-signo tabindex="-1" aria-label="Cambiar el signo de ${etq}" ${puede ? "" : "disabled"}>±</button>` : ""}
+  <input inputmode="decimal" autocomplete="off" ${attr} value="${esc(v ?? "")}" ${puede ? "" : "disabled"} aria-label="${etq}"></span></label>`;
+function nivelesHtml(d, r, puede) {
+  const t = MD.tramo;
+  const costado = esquemaCostado(d.niveles.map((n) => ({ h: numeroCampo(n.altura), etq: `${numero(numeroCampo(n.altura), 1)} m` })), t, `nivel a ${d.niveles[t]?.altura} m`);
+  return `<div class="med-esquema"><img src="plantillas/mastil-esquema.png" alt="Planta del mástil: lados 1, 2 y 3, D1, D2 y D3 positivos en el sentido de las flechas" class="med-dibujo">${costado}</div>
+    <div class="med-unidad" role="group" aria-label="Unidad de las lecturas">Lecturas en
+      <button type="button" data-unidad="cm" aria-pressed="${d.unidad !== "parante"}" ${puede ? "" : "disabled"}>cm</button>
+      <button type="button" data-unidad="parante" aria-pressed="${d.unidad === "parante"}" ${puede ? "" : "disabled"}>medios parantes${numeroCampo(d.medio_parante) ? ` (1 = ${numero(numeroCampo(d.medio_parante), 1)} cm)` : ""}</button></div>
+    ${d.unidad === "parante" && !numeroCampo(d.medio_parante) ? `<p class="nota med-alerta">Falta la medida del medio parante (en Datos) para pasar las lecturas a cm.</p>` : ""}
+    <p class="nota med-ayuda">En cada nivel, mirá con el teodolito el medio del parante desde los lados 1, 2 y 3 y anotá D1, D2 y D3 (positivo hacia donde marca el dibujo; con ± cambiás el signo). A es el ancho de la cara.</p>
+    <div class="med-tramos">${d.niveles.map((n, i) => {
+      const f = r.filas[i];
+      return `<section class="med-tramo${i === t ? " actual" : ""}" data-tramo="${i}">
+        <h3>Nivel ${i + 1} <small>a ${numero(numeroCampo(n.altura), 1)} m · A ${n.A != null && n.A !== "" ? numero(numeroCampo(n.A), 0) + " cm" : "—"}</small></h3>
+        <div class="med-tres">${[0, 1, 2].map((k) => campoNum(`data-d="${i}:${k}"`, n.D[k], puede, `D${k + 1}${d.unidad === "parante" ? "" : " (cm)"}`)).join("")}</div>
+        <p class="med-desp" data-desp="${i}">${resNivel(f)}</p>
+      </section>`;
+    }).join("")}</div>`;
+}
+const resNivel = (f) => (f.falta ? "Desplome: —" : `d ${numero(f.d, 1)} cm · giro <b>${f.a != null ? numero(f.a, 2) + "°" : "—"}</b> · x ${numero(f.x, 1)} · y ${numero(f.y, 1)} · desplome <b>${numero(f.r, 1)} cm</b>`);
+function resultadoMastilHtml(r) {
+  const grande = r.cumple == null ? `<div class="med-veredicto">Faltan lecturas</div>`
+    : `<div class="med-veredicto ${r.cumple ? "si" : "no"}">${r.cumple ? "CUMPLE" : "NO CUMPLE"}<small>${r.cumple ? "Giro y desplome dentro de las tolerancias de la planilla" : esc(r.problemas.join(" · "))}</small></div>`;
+  return `${grande}
+    <table class="med-res"><thead><tr><th>Altura</th><th>d</th><th>α</th><th>x</th><th>y</th><th>r</th></tr></thead><tbody>
+      ${r.filas.map((f) => `<tr><td>${numero(f.h, 1)} m</td>${f.falta ? `<td colspan="5" class="nota">sin lecturas</td>` : `<td>${numero(f.d, 1)}</td>
+        <td>${f.a != null ? numero(f.a, 2) + "°" : "—"}</td><td>${numero(f.x, 1)}</td><td>${numero(f.y, 1)}</td><td><b>${numero(f.r, 1)}</b></td>`}</tr>`).join("")}
     </tbody></table>
-    ${puede && !MD.m.nueva ? `<button class="boton boton-peligro" type="button" id="med-borrar">Borrar esta medición</button>` : ""}
-  </div>`;
+    <ul class="med-checks">
+      <li>Giro total máx.: <b>${r.aMax?.a != null ? numero(r.aMax.a, 2) + "°" : "—"}</b> (tolerancia 5°)</li>
+      <li>Giro entre niveles: <b>${r.giro ? `${numero(r.giro.v, 2)}° entre ${numero(r.giro.de, 1)} y ${numero(r.giro.a, 1)} m` : "—"}</b> (0,5° cada 3 m${r.giro ? `: máx. ${numero(r.giro.lim, 2)}°` : ""})</li>
+      <li>Desplome entre niveles: <b>${r.desp ? `${numero(r.desp.v * 100, 2)} % entre ${numero(r.desp.de, 1)} y ${numero(r.desp.a, 1)} m` : "—"}</b> (tolerancia 0,25 %)</li>
+      ${r.adm != null ? `<li>Desplome máx.: <b>${fmtCm(r.rMax)}</b> (admisible ${fmtCm(r.adm)})</li>` : ""}
+    </ul>
+    <p class="nota">Cálculo igual que la planilla: d = (D1+D2+D3)/3, e = d·√3/A, α = arcsen(e), x = (D2−D3)/√3, y = (2·D1−D2−D3)/3, r = √(x²+y²).</p>`;
 }
 
-// gráfico de desplazamientos según la altura (como el de la planilla), con la tolerancia
+// ---- tensiones: L1, L2 y L3 de cada rienda, por anclaje
+function anclajeHtml(ia, d, r, puede) {
+  const a = d.anclajes[ia], ra = r.anclajes[ia];
+  return `<p class="nota med-ayuda">Anclaje <b>${esc(a.nombre)}</b>: cargá las tres lecturas del tensiómetro de cada rienda. La lectura de referencia es la del perfil (se cambia en Datos). Tolerancia ±${numero(r.tol, 0)} %.</p>
+    <div class="med-tramos">${a.riendas.map((x, i) => {
+      const f = ra.riendas[i];
+      return `<section class="med-tramo${i === MD.tramo ? " actual" : ""}" data-tramo="${i}">
+        <h3>Rienda ${esc(x.nombre)} <small>${esc(x.tipo || "")} · referencia ${x.nominal != null && x.nominal !== "" ? numero(numeroCampo(x.nominal), 0) : "—"}</small></h3>
+        <div class="med-tres">${[0, 1, 2].map((k) => campoNum(`data-l="${ia}:${i}:${k}"`, x.L[k], puede, `L${k + 1}`, false)).join("")}</div>
+        <p class="med-desp" data-desp="${i}">${resRienda(f, r.tol)}</p>
+      </section>`;
+    }).join("")}</div>`;
+}
+const resRienda = (f, tol) => (f.prom == null ? "Promedio: —" : `Promedio <b>${numero(f.prom, 0)}</b> · error <b class="${f.bien ? "bien" : "mal"}">${f.err > 0 ? "+" : ""}${numero(f.err, 1)} %</b>${f.completa ? "" : " (faltan lecturas)"}`);
+function resultadoTensionHtml(r) {
+  const grande = r.cumple == null ? `<div class="med-veredicto">Faltan lecturas</div>`
+    : `<div class="med-veredicto ${r.cumple ? "si" : "no"}">${r.cumple ? "CUMPLE" : "NO CUMPLE"}<small>${r.cumple ? `Todas las riendas medidas dentro de ±${numero(r.tol, 0)} %` : `${r.fuera.length} rienda${r.fuera.length === 1 ? "" : "s"} fuera de ±${numero(r.tol, 0)} %`}${r.completo ? "" : ` (${r.medidas} de ${r.total} medidas)`}</small></div>`;
+  return `${grande}${r.anclajes.map((a) => `<h3 class="med-sub">Anclaje ${esc(a.nombre)}</h3>
+    <table class="med-res"><thead><tr><th>Rienda</th><th>Tipo</th><th>Ref.</th><th>Prom.</th><th>Error</th></tr></thead><tbody>
+      ${a.riendas.map((f) => `<tr class="${f.prom != null && !f.bien ? "fuera" : ""}"><td>${esc(f.nombre)}</td><td>${esc(f.tipo || "")}</td><td>${numero(numeroCampo(f.nominal), 0)}</td>
+        <td>${f.prom != null ? numero(f.prom, 0) : "—"}</td><td><b>${f.err != null ? `${f.err > 0 ? "+" : ""}${numero(f.err, 1)} %` : "—"}</b></td></tr>`).join("")}
+    </tbody></table>`).join("")}
+    <p class="nota">Cálculo igual que la planilla: error = (promedio / lectura − 1) × 100, dentro de ±${numero(r.tol, 0)} %.</p>`;
+}
+
+// ---- datos generales y del sitio
+function datosHtml(m, puede) {
+  const d = m.datos, dis = puede ? "" : "disabled";
+  const campo = (k, t, extra = "") => `<label>${t}<input data-dato="${k}" value="${esc(d[k] ?? "")}" ${dis} ${extra}></label>`;
+  const perfiles = MD.perfiles || [];
+  const delTipo = perfiles.filter((p) => p.tipo === MED_TIPO[m.tipo].estructura);
+  const perfil = `<label>Perfil (modelo)<select id="med-perfil" ${dis}><option value="">${d.perfil_id ? "" : "Sin perfil"}</option>
+      ${delTipo.map((p) => `<option value="${esc(p.id)}" ${p.id === d.perfil_id ? "selected" : ""}>${esc(p.nombre)}</option>`).join("")}</select></label>
+    <p class="nota">Al elegir otro perfil se cargan sus datos (las lecturas se mantienen). <button type="button" class="enlace" id="med-ver-perfiles">Ver y editar perfiles</button>${puede ? ` · <button type="button" class="enlace" id="med-a-perfil">Guardar estos datos como perfil</button>` : ""}</p>`;
+  let gen, sitio;
+  if (m.tipo === "verticalidad_monopolo") {
+    gen = `<div class="dos">${campo("radiobase", "Radiobase")}${campo("departamento", "Departamento")}</div>
+      ${campo("altura", "Altura total (cm)", 'inputmode="decimal"')}${campo("instrumento", "Instrumento y fecha de calibración")}
+      <label>Observaciones<textarea data-dato="observaciones" rows="2" ${dis}>${esc(d.observaciones || "")}</textarea></label>
+      ${campo("licitacion", "Licitación de la inspección")}${campo("empresa", "Empresa responsable")}${campo("representante", "Representante técnico")}${campo("firma", "Firma y n° de Caja Profesional")}`;
+    sitio = `<h3>Tramos del monopolo</h3><p class="nota">Ancho del fuste y altura de cada punto donde se lee. La planilla tiene lugar para ${MAX_FILAS.monopolo}.</p>
+      ${tablaFilas("tramos", d.tramos, [["nombre", "Tramo", "text"], ["ancho", "Ancho (cm)"], ["altura", "Altura (cm)"]], dis)}`;
+  } else {
+    gen = `<div class="dos">${campo("estacion", "Estación")}${campo("altura_txt", "Altura")}</div>${campo("fabricante", "Fabricante")}
+      ${campo("instrumento", "Instrumento")}${m.tipo === "tension_riendas" ? campo("vencimiento", "Fecha de vencimiento de calibración") : ""}
+      ${campo("responsable", "Responsable")}${m.tipo === "tension_riendas" ? campo("viento", "Indicaciones: viento") : ""}`;
+    sitio = m.tipo === "verticalidad_mastil"
+      ? `<div class="dos">${campo("medio_parante", "Medida de medio parante (cm)", 'inputmode="decimal"')}${campo("desplome_admisible", "Desplome máx. admisible (cm)", 'inputmode="decimal"')}</div>
+        <h3>Niveles</h3><p class="nota">Altura de cada nivel y A, el ancho de la cara (completar en sitio). La planilla tiene lugar para ${MAX_FILAS.mastil}.</p>
+        ${tablaFilas("niveles", d.niveles, [["altura", "Altura (m)"], ["A", "A (cm)"]], dis)}`
+      : `${campo("tolerancia", "Tolerancia (± %)", 'inputmode="decimal"')}
+        <h3>Riendas</h3><p class="nota">Las mismas en los tres anclajes. La planilla tiene lugar para ${MAX_FILAS.riendas} por anclaje.</p>
+        ${tablaFilas("riendas", d.anclajes[0].riendas, [["nombre", "Rienda", "text"], ["tipo", "Tipo", "text"], ["nominal", "Lectura de referencia"]], dis)}`;
+  }
+  return `<div class="form med-datos">
+    <label>Fecha<input type="date" data-fecha value="${esc(String(m.fecha || "").slice(0, 10))}" ${dis}></label>
+    ${perfil}${gen}${sitio}
+    ${puede && !m.nueva ? `<button class="boton boton-peligro" type="button" id="med-borrar">Borrar esta medición</button>` : ""}
+  </div>`;
+}
+function tablaFilas(clave, filas, cols, dis, max) {
+  const tope = max || MAX_FILAS[clave === "tramos" ? "monopolo" : clave === "niveles" ? "mastil" : "riendas"];
+  return `<table class="med-geo" data-tabla="${clave}"><thead><tr>${cols.map(([, t]) => `<th>${t}</th>`).join("")}<th></th></tr></thead><tbody>
+    ${filas.map((f, i) => `<tr>${cols.map(([k, t, tipo]) => `<td><input ${tipo === "text" ? "" : 'inputmode="decimal"'} data-fila="${clave}:${i}:${k}" value="${esc(f[k] ?? "")}" ${dis} aria-label="${t} ${i + 1}"></td>`).join("")}
+      <td>${dis ? "" : `<button type="button" class="quitar" data-quitar="${clave}:${i}" aria-label="Quitar la fila ${i + 1}" ${filas.length <= 1 ? "disabled" : ""}>✕</button>`}</td></tr>`).join("")}
+  </tbody></table>${dis ? "" : `<button type="button" class="boton boton-chico" data-agregar="${clave}" ${filas.length >= tope ? "disabled" : ""}>+ Agregar fila</button>${filas.length >= tope ? ` <span class="nota">(la planilla no tiene más lugar)</span>` : ""}`}`;
+}
+// agregar o quitar filas en la medición (tramos, niveles o riendas) manteniendo las lecturas a la par
+function cambiarFilas(m, clave, accion, i) {
+  const d = m.datos;
+  if (clave === "tramos") {
+    if (accion === "agregar") { d.tramos.push({ nombre: String(d.tramos.length + 1), ancho: "", altura: "" }); LADOS.forEach((l) => d[l].push({ iz: ["", "", ""], de: ["", "", ""] })); }
+    else { d.tramos.splice(i, 1); LADOS.forEach((l) => d[l].splice(i, 1)); }
+  } else if (clave === "niveles") {
+    if (accion === "agregar") d.niveles.push({ altura: "", A: d.niveles.at(-1)?.A ?? "", D: ["", "", ""] }); else d.niveles.splice(i, 1);
+  } else {
+    d.anclajes.forEach((a) => { if (accion === "agregar") a.riendas.push({ nombre: String(a.riendas.length + 1), tipo: a.riendas.at(-1)?.tipo || "", nominal: a.riendas.at(-1)?.nominal ?? "", L: ["", "", ""] }); else a.riendas.splice(i, 1); });
+  }
+}
+
+// gráfico del monopolo: desplazamientos según la altura, con la tolerancia
 function graficoHtml(r) {
   const f = r.filas.filter((x) => x.h != null);
   if (!f.length) return "";
@@ -5709,7 +5951,7 @@ function graficoHtml(r) {
   </svg>
   <p class="med-leyenda"><span style="--c:#6CC4D1">Lado 1 (x)</span><span style="--c:#F2C14E">Lado 2 (y)</span>${r.tol ? `<span class="tol">Tolerancia ±${numero(r.tol, 1)} cm</span>` : ""}</p>`;
 }
-function resultadoHtml(r, d) {
+function resultadoHtml(r) {
   const grande = r.cumple == null ? `<div class="med-veredicto">Faltan lecturas</div>`
     : `<div class="med-veredicto ${r.cumple ? "si" : "no"}">${r.cumple ? "CUMPLE" : "NO CUMPLE"}<small>desplazamiento máx. ${fmtCm(r.max)} · tolerancia H/200 = ${fmtCm(r.tol)} (TIA-222-G)</small></div>`;
   return `${grande}
@@ -5723,85 +5965,207 @@ function resultadoHtml(r, d) {
 }
 
 function refrescarCalculo() {
-  const r = calcularVerticalidad(MD.m.datos);
-  $("#med-pie").innerHTML = pieHtml(r);
-  const lado = MD.pestana, k = lado === "lado1" ? "x" : "y";
-  if (lado === "lado1" || lado === "lado2") document.querySelectorAll("[data-desp]").forEach((p) => {
-    const i = Number(p.dataset.desp), v = r.filas[i][k];
-    if (i > 0) p.innerHTML = v == null ? "Desplazamiento: —" : `Desplazamiento ${k}: <b>${numero(v, 1)} cm</b>`;
+  const m = MD.m, r = calcularMedicion(m);
+  $("#med-pie").innerHTML = pieHtml(m, r);
+  const k = MD.pestana;
+  document.querySelectorAll("[data-desp]").forEach((p) => {
+    const i = Number(p.dataset.desp);
+    if (m.tipo === "verticalidad_monopolo" && (k === "lado1" || k === "lado2")) {
+      const c = k === "lado1" ? "x" : "y", v = r.filas[i][c];
+      if (i > 0) p.innerHTML = v == null ? "Desplazamiento: —" : `Desplazamiento ${c}: <b>${numero(v, 1)} cm</b>`;
+    } else if (m.tipo === "verticalidad_mastil" && k === "niveles") p.innerHTML = resNivel(r.filas[i]);
+    else if (m.tipo === "tension_riendas" && k.startsWith("anclaje")) p.innerHTML = resRienda(r.anclajes[Number(k.slice(7))].riendas[i], r.tol);
   });
 }
 
-function enlazarMedicion(p, d) {
-  const cambio = () => { MD.m.cambiado = true; guardarBorrador(); refrescarCalculo(); };
+function enlazarMedicion(p, m) {
+  const d = m.datos;
+  const cambio = () => { m.cambiado = true; guardarBorrador(); refrescarCalculo(); };
   const marcarTramo = (i) => {
     if (MD.tramo === i) return;
     MD.tramo = i;
     p.querySelectorAll(".med-tramo").forEach((s) => s.classList.toggle("actual", Number(s.dataset.tramo) === i));
     p.querySelectorAll(".med-costado g").forEach((g, k) => g.classList.toggle("actual", k === i));
   };
-  const entradas = [...p.querySelectorAll("[data-gms]")];
+  const entradas = [...p.querySelectorAll("[data-gms], [data-d], [data-l]")];
   entradas.forEach((inp, idx) => {
-    inp.onfocus = () => { marcarTramo(Number(inp.dataset.gms.split(":")[1])); inp.select(); };
-    inp.oninput = () => {
-      const [lado, i, cual, k] = inp.dataset.gms.split(":");
-      const v = inp.value.replace(/[^\d.,]/g, "");
-      if (v !== inp.value) inp.value = v;
-      const n = numeroCampo(v);
-      inp.classList.toggle("mal", n != null && (isNaN(n) || n < 0 || n > Number(inp.dataset.max)));
-      d[lado][Number(i)][cual][Number(k)] = v;
-      cambio();
-      // al completar grados (3 cifras) o minutos (2) pasa solo al siguiente
-      const lleno = (k === "0" && v.length >= 3) || (k !== "0" && /^\d{2}$/.test(v));
-      if (lleno && entradas[idx + 1]) entradas[idx + 1].focus();
-    };
+    const fila = Number((inp.dataset.gms || inp.dataset.d || inp.dataset.l).split(":")[inp.dataset.l ? 1 : inp.dataset.gms ? 1 : 0]);
+    inp.onfocus = () => { marcarTramo(fila); inp.select(); };
     inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); entradas[idx + 1]?.focus(); } };
+    inp.oninput = () => {
+      if (inp.dataset.gms) {
+        const [lado, i, cual, k] = inp.dataset.gms.split(":");
+        const v = inp.value.replace(/[^\d.,]/g, "");
+        if (v !== inp.value) inp.value = v;
+        const n = numeroCampo(v);
+        inp.classList.toggle("mal", n != null && (isNaN(n) || n < 0 || n > Number(inp.dataset.max)));
+        d[lado][Number(i)][cual][Number(k)] = v;
+        cambio();
+        // al completar grados (3 cifras) o minutos y segundos (2) pasa solo a la casilla siguiente
+        if (((k === "0" && v.length >= 3) || (k !== "0" && /^\d{2}$/.test(v))) && entradas[idx + 1]) entradas[idx + 1].focus();
+        return;
+      }
+      const v = inp.value.replace(/[^\d.,-]/g, "");
+      if (v !== inp.value) inp.value = v;
+      inp.classList.toggle("mal", v !== "" && v !== "-" && isNaN(numeroCampo(v)));
+      if (inp.dataset.d) { const [i, k] = inp.dataset.d.split(":").map(Number); d.niveles[i].D[k] = v; }
+      else { const [a, i, k] = inp.dataset.l.split(":").map(Number); d.anclajes[a].riendas[i].L[k] = v; }
+      cambio();
+    };
   });
+  p.querySelectorAll("[data-signo]").forEach((b) => (b.onclick = () => {
+    const inp = b.parentElement.querySelector("input");
+    inp.value = inp.value.startsWith("-") ? inp.value.slice(1) : "-" + inp.value;
+    inp.dispatchEvent(new Event("input"));
+    inp.focus();
+  }));
   p.querySelectorAll(".med-tramo").forEach((s) => s.addEventListener("click", () => marcarTramo(Number(s.dataset.tramo))));
+  p.querySelectorAll("[data-unidad]").forEach((b) => (b.onclick = () => { d.unidad = b.dataset.unidad; m.cambiado = true; guardarBorrador(); pintarMedicion(); }));
   p.querySelectorAll("[data-dato]").forEach((inp) => (inp.oninput = () => { d[inp.dataset.dato] = inp.value; cambio(); }));
-  p.querySelector("[data-fecha]")?.addEventListener("input", (e) => { MD.m.fecha = e.target.value; cambio(); });
-  p.querySelectorAll("[data-geo]").forEach((inp) => (inp.oninput = () => {
-    const [i, k] = inp.dataset.geo.split(":");
-    d.tramos[Number(i)][k] = inp.value;
+  p.querySelector("[data-fecha]")?.addEventListener("input", (e) => { m.fecha = e.target.value; cambio(); });
+  p.querySelectorAll("[data-fila]").forEach((inp) => (inp.oninput = () => {
+    const [clave, i, k] = inp.dataset.fila.split(":");
+    if (clave === "riendas") d.anclajes.forEach((a) => (a.riendas[Number(i)][k] = inp.value));
+    else d[clave][Number(i)][k] = inp.value;
     cambio();
   }));
+  p.querySelectorAll("[data-agregar]").forEach((b) => (b.onclick = () => { cambiarFilas(m, b.dataset.agregar, "agregar"); guardarBorrador(); pintarMedicion(); }));
+  p.querySelectorAll("[data-quitar]").forEach((b) => (b.onclick = () => {
+    const [clave, i] = b.dataset.quitar.split(":");
+    if (!confirm("¿Quitar esta fila? Se borran también sus lecturas.")) return;
+    cambiarFilas(m, clave, "quitar", Number(i)); guardarBorrador(); pintarMedicion();
+  }));
+  $("#med-perfil")?.addEventListener("change", async (e) => {
+    const perfil = (await cargarPerfiles()).find((x) => x.id === e.target.value);
+    if (!perfil) return;
+    aplicarPerfil(m, perfil, MD.o); guardarBorrador(); pintarMedicion();
+    aviso(`Perfil «${perfil.nombre}» aplicado`);
+  });
+  $("#med-ver-perfiles")?.addEventListener("click", () => { guardarBorrador(); const vuelta = structuredClone(m); abrirPerfiles(MED_TIPO[m.tipo].estructura, () => editarMedicion(vuelta)); });
+  $("#med-a-perfil")?.addEventListener("click", () => {
+    guardarBorrador();
+    const vuelta = structuredClone(m);
+    editarPerfil(perfilDesdeMedicion(m), () => editarMedicion(vuelta));
+  });
   $("#med-borrar")?.addEventListener("click", async () => {
     if (!confirm("¿Borrar esta medición? No se puede deshacer.")) return;
     try {
-      if (!MD.m.nueva) await S.api.borrarMedicion(MD.m.id);
-      quitarBorrador(MD.m.id);
+      if (m.creado || !m.borrador) await S.api.borrarMedicion(m.id).catch((e) => { if (!/no se encontr/i.test(e.message)) throw e; });
+      quitarBorrador(m.id);
       aviso("Medición borrada");
-      const o = MD.o, t = MD.m.tipo; MD.m = null;
-      abrirMediciones(o, t);
+      MD.m = null;
+      abrirMediciones(MD.o, m.tipo);
     } catch (e) { aviso(sinRed(e) ? "Sin conexión: para borrar una medición hace falta señal." : e.message, true); }
   });
 }
 
 async function guardarMedicionActual() {
-  const m = MD.m, r = calcularVerticalidad(m.datos);
+  const m = MD.m, r = calcularMedicion(m);
   const b = $("#med-guardar");
   b.disabled = true;
-  const fila = { id: m.id, estructura_id: m.estructura_id, tipo: m.tipo, fecha: m.fecha || hoy(), datos: m.datos,
-    resultado: { cumple: r.cumple, max_cm: r.max, tolerancia_cm: r.tol, completo: r.completo } };
+  const fila = { id: m.id, estructura_id: m.estructura_id, tipo: m.tipo, fecha: m.fecha || hoy(), datos: m.datos, resultado: resumenMedicion(m, r) };
   try {
     await S.api.guardarMedicion(fila);
     quitarBorrador(m.id);
-    m.nueva = false; m.cambiado = false; m.resultado = fila.resultado;
-    if (esperando().some((p) => p.op === "guardarMedicion" && p.args[0].id === m.id)) m.pendiente = true;
-    else aviso(r.cumple == null ? "Medición guardada (faltan lecturas)" : `Medición guardada: ${r.cumple ? "cumple" : "no cumple"}`);
+    m.nueva = false; m.cambiado = false; m.resultado = fila.resultado; m.creado = m.creado || new Date().toISOString();
+    if (!esperando().some((x) => x.op === "guardarMedicion" && x.args[0].id === m.id))
+      aviso(r.cumple == null ? "Medición guardada (faltan lecturas)" : `Medición guardada: ${r.cumple ? "cumple" : "no cumple"}`);
     pintarMedicion();
   } catch (e) { aviso(e.message, true, 9000); b.disabled = false; }
 }
 
-// ---- Excel: se rellena la planilla original (plantillas/verticalidad-monopolo.xlsx) sin tocar su formato,
-// fórmulas ni gráfico; Excel recalcula al abrir y además se dejan escritos los resultados.
+// ---- pantalla de perfiles
+async function abrirPerfiles(tipoEst, volver) {
+  const p = pantallaMedicion();
+  p.innerHTML = `${barraMed("Perfiles de modelos", "Volver")}
+    <div class="med-cuerpo"><p class="nota">Cada perfil es un modelo de estructura (marca y altura) con los datos de su planilla. Al cargar una medición se elige el perfil y después se ajustan los datos del sitio.</p>
+      ${editor() ? `<div class="dos"><button class="boton boton-primario" type="button" data-nuevo="monopolo">+ Perfil de monopolo</button><button class="boton boton-primario" type="button" data-nuevo="mastil">+ Perfil de mástil</button></div>` : ""}
+      <ul class="med-lista" id="perfiles-lista"><li class="nota">Cargando…</li></ul></div>`;
+  p.querySelector("[data-volver]").onclick = volver;
+  const perfiles = await cargarPerfiles(true);
+  const ul = $("#perfiles-lista");
+  if (!ul) return;
+  const orden = [...perfiles].sort((a, b) => (a.tipo === tipoEst ? -1 : 0) - (b.tipo === tipoEst ? -1 : 0) || a.nombre.localeCompare(b.nombre, "es"));
+  ul.innerHTML = (MD.perfilesFalta ? `<li class="nota">Para guardar perfiles hay que correr sql/parte26_perfiles.sql en Neon. Mientras tanto se usan los que vienen con la web.</li>` : "")
+    + orden.map((x) => `<li><button type="button" data-perfil="${esc(x.id)}"><span><b>${esc(x.nombre)}</b> <span class="med-chip">${x.tipo === "monopolo" ? "Monopolo" : "Mástil"}</span></span>
+      <small>${esc(x.datos.fabricante || "sin fabricante")} · ${x.tipo === "monopolo" ? `${x.datos.tramos?.length || 0} tramos` : `${x.datos.niveles?.length || 0} niveles · ${x.datos.riendas?.length || 0} riendas por anclaje`}${x.autor ? ` · cambiado por ${esc(x.autor)}` : ""}</small></button></li>`).join("");
+  ul.querySelectorAll("[data-perfil]").forEach((b) => (b.onclick = () => editarPerfil(structuredClone(perfiles.find((x) => x.id === b.dataset.perfil)), () => abrirPerfiles(tipoEst, volver))));
+  p.querySelectorAll("[data-nuevo]").forEach((b) => (b.onclick = () => editarPerfil(perfilVacio(b.dataset.nuevo), () => abrirPerfiles(tipoEst, volver))));
+}
+const perfilVacio = (tipo) => ({ id: nuevoId(), nombre: "", tipo, nuevo: true, datos: tipo === "monopolo"
+  ? { fabricante: "", altura_m: "", tramos: ["1", "2", "3", "4", "Tope"].map((nombre) => ({ nombre, ancho: "", altura: "" })) }
+  : { fabricante: "", altura_m: "", medio_parante: "", desplome_admisible: "", tolerancia: 30, anclajes: ["A", "B", "C"],
+      niveles: [{ altura: "", A: 120 }], riendas: [{ nombre: "1", tipo: "", nominal: "" }] } });
+function perfilDesdeMedicion(m) {
+  const d = m.datos, p = perfilVacio(MED_TIPO[m.tipo].estructura);
+  const base = MD.perfiles?.find((x) => x.id === d.perfil_id);
+  if (base) Object.assign(p.datos, structuredClone(base.datos));
+  p.nombre = base ? `${base.nombre} (copia)` : "";
+  p.datos.fabricante = d.fabricante || p.datos.fabricante;
+  if (m.tipo === "verticalidad_monopolo") { p.datos.tramos = d.tramos.map(({ nombre, ancho, altura }) => ({ nombre, ancho, altura })); p.datos.altura_m = numeroCampo(d.altura) ? numeroCampo(d.altura) / 100 : ""; }
+  if (m.tipo === "verticalidad_mastil") Object.assign(p.datos, { niveles: d.niveles.map(({ altura, A }) => ({ altura, A })), medio_parante: d.medio_parante, desplome_admisible: d.desplome_admisible });
+  if (m.tipo === "tension_riendas") Object.assign(p.datos, { riendas: d.anclajes[0].riendas.map(({ nombre, tipo, nominal }) => ({ nombre, tipo, nominal })), tolerancia: d.tolerancia, anclajes: d.anclajes.map((a) => a.nombre) });
+  return p;
+}
+function editarPerfil(pf, volver) {
+  const p = pantallaMedicion(), d = pf.datos, puede = editor(), dis = puede ? "" : "disabled";
+  const campo = (k, t, extra = "") => `<label>${t}<input data-pd="${k}" value="${esc(d[k] ?? "")}" ${dis} ${extra}></label>`;
+  p.innerHTML = `${barraMed(pf.nuevo ? "Perfil nuevo" : esc(pf.nombre), "Perfiles", puede ? `<button class="boton boton-primario boton-chico" type="button" id="pf-guardar">Guardar</button>` : "")}
+    <div class="med-cuerpo"><div class="form med-datos">
+      <label>Nombre<input id="pf-nombre" value="${esc(pf.nombre)}" placeholder="Ej. Mástil Mingyuan 100 m" ${dis}></label>
+      <p class="nota">Planilla: <b>${pf.tipo === "monopolo" ? "verticalidad de monopolo" : "mástil (verticalidad y tensión de riendas)"}</b></p>
+      <div class="dos">${campo("fabricante", "Fabricante")}${campo("altura_m", "Altura (m)", 'inputmode="decimal"')}</div>
+      ${pf.tipo === "monopolo"
+        ? `<h3>Tramos</h3>${tablaFilas("tramos", d.tramos, [["nombre", "Tramo", "text"], ["ancho", "Ancho (cm)"], ["altura", "Altura (cm)"]], dis)}`
+        : `<div class="dos">${campo("medio_parante", "Medio parante (cm)", 'inputmode="decimal"')}${campo("desplome_admisible", "Desplome admisible (cm)", 'inputmode="decimal"')}</div>
+          <h3>Niveles de verticalidad</h3>${tablaFilas("niveles", d.niveles, [["altura", "Altura (m)"], ["A", "A (cm)"]], dis)}
+          <h3>Riendas (iguales en cada anclaje)</h3>
+          <div class="dos">${campo("tolerancia", "Tolerancia (± %)", 'inputmode="decimal"')}<label>Anclajes<input data-pd-anclajes value="${esc((d.anclajes || ["A", "B", "C"]).join(", "))}" ${dis}></label></div>
+          ${tablaFilas("riendas", d.riendas, [["nombre", "Rienda", "text"], ["tipo", "Tipo", "text"], ["nominal", "Lectura de referencia"]], dis)}`}
+      ${puede && !pf.nuevo && S.perfil?.admin ? `<button class="boton boton-peligro" type="button" id="pf-borrar">Borrar este perfil</button>` : ""}
+      ${puede && !pf.nuevo ? `<button class="boton" type="button" id="pf-duplicar">Duplicar (para otra marca o altura)</button>` : ""}
+    </div></div>`;
+  p.querySelector("[data-volver]").onclick = volver;
+  p.querySelectorAll("[data-pd]").forEach((i) => (i.oninput = () => (d[i.dataset.pd] = i.value)));
+  p.querySelector("[data-pd-anclajes]")?.addEventListener("input", (e) => (d.anclajes = e.target.value.split(/[,;\s]+/).filter(Boolean).slice(0, 3)));
+  $("#pf-nombre")?.addEventListener("input", (e) => (pf.nombre = e.target.value));
+  p.querySelectorAll("[data-fila]").forEach((i) => (i.oninput = () => { const [c, n, k] = i.dataset.fila.split(":"); d[c][Number(n)][k] = i.value; }));
+  p.querySelectorAll("[data-agregar]").forEach((b) => (b.onclick = () => {
+    const c = b.dataset.agregar, ult = d[c].at(-1) || {};
+    d[c].push(c === "tramos" ? { nombre: String(d[c].length + 1), ancho: "", altura: "" } : c === "niveles" ? { altura: "", A: ult.A ?? "" } : { nombre: String(d[c].length + 1), tipo: ult.tipo || "", nominal: ult.nominal ?? "" });
+    editarPerfil(pf, volver);
+  }));
+  p.querySelectorAll("[data-quitar]").forEach((b) => (b.onclick = () => { const [c, n] = b.dataset.quitar.split(":"); d[c].splice(Number(n), 1); editarPerfil(pf, volver); }));
+  $("#pf-duplicar")?.addEventListener("click", () => editarPerfil({ ...structuredClone(pf), id: nuevoId(), nombre: `${pf.nombre} (copia)`, nuevo: true }, volver));
+  $("#pf-borrar")?.addEventListener("click", async () => {
+    if (!confirm(`¿Borrar el perfil «${pf.nombre}»? Las mediciones ya hechas no cambian.`)) return;
+    try { await S.api.borrarPerfil(pf.id); await cargarPerfiles(true); aviso("Perfil borrado"); volver(); } catch (e) { aviso(e.message, true); }
+  });
+  $("#pf-guardar")?.addEventListener("click", async () => {
+    if (!pf.nombre.trim()) return aviso("Ponele un nombre al perfil.", true);
+    const limpio = (v) => (v === "" || v == null ? "" : isNaN(numeroCampo(v)) ? v : numeroCampo(v));
+    const datos = structuredClone(d);
+    datos.altura_m = limpio(datos.altura_m);
+    for (const c of ["tramos", "niveles", "riendas"]) datos[c]?.forEach((f) => { for (const k of ["ancho", "altura", "A", "nominal"]) if (k in f) f[k] = limpio(f[k]); });
+    try {
+      await S.api.guardarPerfil({ id: pf.id, nombre: pf.nombre.trim(), tipo: pf.tipo, datos });
+      await cargarPerfiles(true);
+      aviso(`Perfil «${pf.nombre.trim()}» guardado`);
+      volver();
+    } catch (e) { aviso(sinRed(e) ? "Sin conexión: los perfiles se guardan con señal." : e.message, true, 9000); }
+  });
+}
+
+// ---- Excel: se rellena la planilla original sin tocar su formato, imágenes, fórmulas ni gráfico.
+// Excel recalcula al abrir; igual se dejan escritos los resultados (para los programas que no recalculan).
 const colNum = (ref) => [...ref.match(/^[A-Z]+/)[0]].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+const RE_F = /<f\b[^>]*\/>|<f\b[^>]*>[\s\S]*?<\/f>/;
 function ponerCelda(hoja, ref, v) {
   const xml = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const re = new RegExp(`<c r="${ref}"((?:\\s+[a-z:]+="[^"]*")*)\\s*(?:/>|>([\\s\\S]*?)</c>)`);
   const m = hoja.match(re);
-  let attrs = m ? m[1].replace(/\s+t="[^"]*"/, "") : "";
-  const f = m?.[2]?.match(/<f>[\s\S]*?<\/f>/)?.[0] || "";
+  const attrs = m ? m[1].replace(/\s+t="[^"]*"/, "") : "";
+  const f = m?.[2]?.match(RE_F)?.[0] || "";
   let cel;
   if (f) cel = v == null ? `<c r="${ref}"${attrs}>${f}</c>` : typeof v === "number" ? `<c r="${ref}"${attrs}>${f}<v>${v}</v></c>` : `<c r="${ref}"${attrs} t="str">${f}<v>${xml(v)}</v></c>`;
   else if (v == null || v === "") cel = `<c r="${ref}"${attrs}/>`;
@@ -5810,94 +6174,173 @@ function ponerCelda(hoja, ref, v) {
   if (m) return hoja.replace(m[0], cel);
   const fila = ref.match(/\d+$/)[0];
   const rm = hoja.match(new RegExp(`<row r="${fila}"[^>]*?(?:/>|>([\\s\\S]*?)</row>)`));
-  if (!rm) return hoja; // fila inexistente en la planilla: no se escribe
+  if (!rm) return hoja;
   if (rm[0].endsWith("/>")) return hoja.replace(rm[0], rm[0].replace(/\s*\/>$/, `>${cel}</row>`));
   const sig = [...rm[1].matchAll(/<c r="([A-Z]+)\d+"/g)].find((x) => colNum(x[1]) > colNum(ref));
   const dentro = sig ? rm[1].replace(new RegExp(`<c r="${sig[1]}${fila}"`), `${cel}<c r="${sig[1]}${fila}"`) : rm[1] + cel;
   return hoja.replace(rm[0], rm[0].replace(rm[1], dentro));
 }
-async function exportarVerticalidad(m, o, boton) {
+// las fórmulas que quedaron con un error guardado (#DIV/0!) se dejan sin resultado hasta que recalcule
+const sinErroresViejos = (h) => h.replace(/<c r="([A-Z]+\d+)"((?:\s+[a-z:]+="[^"]*")*)>(<f\b[^>]*\/>|<f\b[^>]*>[\s\S]*?<\/f>)<v>[^<]*<\/v><\/c>/g,
+  (todo, ref, at, f) => (/\st="e"/.test(at) ? `<c r="${ref}"${at.replace(/\s+t="[^"]*"/, "")}>${f}</c>` : todo));
+async function abrirPlantilla(archivo) {
+  const XLSX = await prepararExcel();
+  const resp = await fetch(archivo);
+  if (!resp.ok) throw new Error("no se encontró la planilla");
+  const zip = XLSX.CFB.read(new Uint8Array(await resp.arrayBuffer()), { type: "buffer" });
+  return {
+    XLSX, zip,
+    leer: (n) => new TextDecoder().decode(XLSX.CFB.find(zip, "/" + n).content),
+    poner: (n, t) => { const e = XLSX.CFB.find(zip, "/" + n); e.content = new TextEncoder().encode(t); e.size = e.content.length; },
+  };
+}
+function descargarZip(XLSX, zip, nombre) {
+  const bytes = XLSX.CFB.write(zip, { fileType: "zip", type: "array" });
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: nombre });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+async function exportarMedicion(m, o, boton) {
   const original = boton?.textContent;
   if (boton) { boton.disabled = true; boton.textContent = "Armando…"; }
   try {
-    const XLSX = await prepararExcel();
-    const resp = await fetch("plantillas/verticalidad-monopolo.xlsx");
-    if (!resp.ok) throw new Error("no se encontró la planilla");
-    const zip = XLSX.CFB.read(new Uint8Array(await resp.arrayBuffer()), { type: "buffer" });
-    const leer = (n) => new TextDecoder().decode(XLSX.CFB.find(zip, "/" + n).content);
-    const poner = (n, t) => { const e = XLSX.CFB.find(zip, "/" + n); e.content = new TextEncoder().encode(t); e.size = e.content.length; };
-    const d = m.datos, r = calcularVerticalidad(d);
-    let h = leer("xl/worksheets/sheet1.xml");
-    const fechaTxt = m.fecha ? fecha(String(m.fecha).slice(0, 10)) : "";
-    const textos = { D3: fechaTxt, D4: d.radiobase, D5: d.departamento, F8: d.instrumento, E9: d.observaciones,
-      E11: d.licitacion, E12: d.empresa, E13: d.representante, E14: d.firma };
-    for (const [ref, v] of Object.entries(textos)) h = ponerCelda(h, ref, v || null);
-    h = ponerCelda(h, "B7", numeroCampo(d.altura));
-    // lecturas: 5 tramos por lado (filas 20–24 y 30–34), ° ′ ″ izquierda (B–D) y derecha (E–G), ancho y altura (H, I)
-    const filaDe = { lado1: 20, lado2: 30 };
-    for (const lado of LADOS) d.tramos.slice(0, 5).forEach((t, i) => {
-      const f = filaDe[lado] + i, l = d[lado][i];
-      ["B", "C", "D"].forEach((c, k) => (h = ponerCelda(h, c + f, numeroCampo(l.iz[k]))));
-      ["E", "F", "G"].forEach((c, k) => (h = ponerCelda(h, c + f, numeroCampo(l.de[k]))));
-      h = ponerCelda(h, "H" + f, numeroCampo(t.ancho));
-      h = ponerCelda(h, "I" + f, numeroCampo(t.altura));
-    });
-    // resultados ya calculados (por si el programa que lo abre no recalcula)
-    const xs = r.filas.map((x) => x.x), ys = r.filas.map((x) => x.y);
-    for (let i = 0; i < 5; i++) {
-      h = ponerCelda(h, "O" + (20 + i), xs[i] ?? null); h = ponerCelda(h, "O" + (30 + i), ys[i] ?? null);
-      h = ponerCelda(h, "C" + (40 + i), xs[i] ?? null); h = ponerCelda(h, "D" + (40 + i), ys[i] ?? null);
-      h = ponerCelda(h, "E" + (40 + i), r.filas[i]?.r ?? null);
-    }
-    h = ponerCelda(h, "I41", r.tol);
-    // φ izq, φ der, φ med y Δφ med, igual que las fórmulas de la planilla (sin acomodar el paso por 0°)
-    for (const lado of LADOS) {
-      const f0 = filaDe[lado], k = d[lado].map((l) => aDecimal(l.iz)), l = d[lado].map((x) => aDecimal(x.de));
-      const med = k.map((v, i) => (v != null && l[i] != null ? (v + l[i]) / 2 : null));
-      for (let i = 0; i < 5; i++) {
-        h = ponerCelda(h, "K" + (f0 + i), k[i] ?? null); h = ponerCelda(h, "L" + (f0 + i), l[i] ?? null);
-        h = ponerCelda(h, "M" + (f0 + i), med[i] ?? null);
-        if (i > 0) h = ponerCelda(h, "N" + (f0 + i), med[i] != null && med[0] != null ? med[i] - med[0] : null);
-      }
-    }
-    // verificación de puesta a plomo: alturas (fila 48 / columna B), x e y de cada tramo, y la inclinación entre cada par
-    const alt = d.tramos.slice(0, 5).map((t) => numeroCampo(t.altura));
-    const cols = ["F", "G", "H", "I", "J"];
-    for (let j = 0; j < 5; j++) {
-      if (j > 0) h = ponerCelda(h, cols[j] + 48, alt[j]);
-      h = ponerCelda(h, cols[j] + 49, ys[j] ?? null); h = ponerCelda(h, cols[j] + 50, xs[j] ?? null);
-      h = ponerCelda(h, "B" + (52 + j), alt[j]); h = ponerCelda(h, "C" + (52 + j), xs[j] ?? null); h = ponerCelda(h, "D" + (52 + j), ys[j] ?? null);
-    }
-    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
-      if (i === j) continue;
-      const hj = j === 0 ? 0 : alt[j];
-      const ok = [xs[i], ys[i], xs[j], ys[j], alt[i], hj].every((v) => v != null) && alt[i] !== hj;
-      h = ponerCelda(h, cols[j] + (52 + i), ok ? Math.abs(Math.hypot(xs[i] - xs[j], ys[i] - ys[j]) / (alt[i] - hj)) : null);
-    }
-    // fórmulas sin un resultado calculado acá: se borra el viejo (#DIV/0!) para que no se vea hasta que recalcule
-    h = h.replace(/<c r="([A-Z]+\d+)"((?:\s+[a-z:]+="[^"]*")*)>(<f>[\s\S]*?<\/f>)<v>[^<]*<\/v><\/c>/g, (todo, ref, at, f) =>
-      /\st="e"/.test(at) ? `<c r="${ref}"${at.replace(/\s+t="[^"]*"/, "")}>${f}</c>` : todo);
-    poner("xl/worksheets/sheet1.xml", h);
-    // el gráfico guarda una copia de los valores: se actualiza también
-    let g = leer("xl/charts/chart1.xml");
-    const serie = (ref, vals) => {
-      g = g.replace(new RegExp(`(<c:f>${ref.replace(/\$/g, "\\$")}</c:f><c:numCache>[\\s\\S]*?<c:ptCount val="\\d+"\\s*/>)([\\s\\S]*?)(</c:numCache>)`),
-        (t, a, b, c) => a + vals.map((v, i) => (v == null ? "" : `<c:pt idx="${i}"><c:v>${v}</c:v></c:pt>`)).join("") + c);
-    };
-    serie("Monopolo!$O$20:$O$24", xs.slice(0, 5)); serie("Monopolo!$O$30:$O$34", ys.slice(0, 5));
-    const hs = d.tramos.slice(0, 5).map((t) => numeroCampo(t.altura));
-    serie("Monopolo!$I$20:$I$24", hs); serie("Monopolo!$I$30:$I$34", hs);
-    poner("xl/charts/chart1.xml", g);
-    const bytes = XLSX.CFB.write(zip, { fileType: "zip", type: "array" });
-    const nombre = `verticalidad-${String(o.codigo || "monopolo").replace(/[^\w-]+/g, "")}-${String(m.fecha || hoy()).slice(0, 10)}.xlsx`;
-    const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-    const a = Object.assign(document.createElement("a"), { href: url, download: nombre });
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    const nombre = await (m.tipo === "verticalidad_monopolo" ? exportarVerticalidad(m, o) : exportarMastil(m, o));
     aviso("Planilla lista: se descargó " + nombre);
   } catch (e) {
     aviso("No se pudo armar la planilla: " + (sinRed(e) ? "sin conexión (abrí la planilla una vez con señal para que quede guardada)" : e.message), true, 9000);
   } finally {
     if (boton) { boton.disabled = false; boton.textContent = original; }
   }
+}
+async function exportarVerticalidad(m, o) {
+  const { XLSX, zip, leer, poner } = await abrirPlantilla("plantillas/verticalidad-monopolo.xlsx");
+  const d = m.datos, r = calcularVerticalidad(d);
+  let h = leer("xl/worksheets/sheet1.xml");
+  const textos = { D3: m.fecha ? fecha(String(m.fecha).slice(0, 10)) : "", D4: d.radiobase, D5: d.departamento, F8: d.instrumento, E9: d.observaciones,
+    E11: d.licitacion, E12: d.empresa, E13: d.representante, E14: d.firma };
+  for (const [ref, v] of Object.entries(textos)) h = ponerCelda(h, ref, v || null);
+  h = ponerCelda(h, "B7", numeroCampo(d.altura));
+  const filaDe = { lado1: 20, lado2: 30 }, n = MAX_FILAS.monopolo;
+  const tramos = d.tramos.slice(0, n);
+  for (const lado of LADOS) for (let i = 0; i < n; i++) {
+    const f = filaDe[lado] + i, t = tramos[i], l = d[lado][i];
+    ["B", "C", "D"].forEach((c, k) => (h = ponerCelda(h, c + f, l ? numeroCampo(l.iz[k]) : null)));
+    ["E", "F", "G"].forEach((c, k) => (h = ponerCelda(h, c + f, l ? numeroCampo(l.de[k]) : null)));
+    h = ponerCelda(h, "H" + f, t ? numeroCampo(t.ancho) : null);
+    h = ponerCelda(h, "I" + f, t ? numeroCampo(t.altura) : null);
+    if (t) h = ponerCelda(h, "A" + f, /^\d+$/.test(t.nombre) ? Number(t.nombre) : t.nombre);
+  }
+  const xs = r.filas.map((x) => x.x), ys = r.filas.map((x) => x.y);
+  for (let i = 0; i < n; i++) {
+    h = ponerCelda(h, "O" + (20 + i), xs[i] ?? null); h = ponerCelda(h, "O" + (30 + i), ys[i] ?? null);
+    h = ponerCelda(h, "C" + (40 + i), xs[i] ?? null); h = ponerCelda(h, "D" + (40 + i), ys[i] ?? null);
+    h = ponerCelda(h, "E" + (40 + i), r.filas[i]?.r ?? null);
+  }
+  h = ponerCelda(h, "I41", r.tol);
+  for (const lado of LADOS) {
+    const f0 = filaDe[lado], k = d[lado].map((l) => aDecimal(l.iz)), l = d[lado].map((x) => aDecimal(x.de));
+    const med = k.map((v, i) => (v != null && l[i] != null ? (v + l[i]) / 2 : null));
+    for (let i = 0; i < n; i++) {
+      h = ponerCelda(h, "K" + (f0 + i), k[i] ?? null); h = ponerCelda(h, "L" + (f0 + i), l[i] ?? null);
+      h = ponerCelda(h, "M" + (f0 + i), med[i] ?? null);
+      if (i > 0) h = ponerCelda(h, "N" + (f0 + i), med[i] != null && med[0] != null ? med[i] - med[0] : null);
+    }
+  }
+  const alt = tramos.map((t) => numeroCampo(t.altura));
+  const cols = ["F", "G", "H", "I", "J"];
+  for (let j = 0; j < n; j++) {
+    if (j > 0) h = ponerCelda(h, cols[j] + 48, alt[j] ?? null);
+    h = ponerCelda(h, cols[j] + 49, ys[j] ?? null); h = ponerCelda(h, cols[j] + 50, xs[j] ?? null);
+    h = ponerCelda(h, "B" + (52 + j), alt[j] ?? null); h = ponerCelda(h, "C" + (52 + j), xs[j] ?? null); h = ponerCelda(h, "D" + (52 + j), ys[j] ?? null);
+  }
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    if (i === j) continue;
+    const hj = j === 0 ? 0 : alt[j];
+    const ok = [xs[i], ys[i], xs[j], ys[j], alt[i], hj].every((v) => v != null) && alt[i] !== hj;
+    h = ponerCelda(h, cols[j] + (52 + i), ok ? Math.abs(Math.hypot(xs[i] - xs[j], ys[i] - ys[j]) / (alt[i] - hj)) : null);
+  }
+  poner("xl/worksheets/sheet1.xml", sinErroresViejos(h));
+  let g = leer("xl/charts/chart1.xml");
+  const serie = (ref, vals) => {
+    g = g.replace(new RegExp(`(<c:f>${ref.replace(/\$/g, "\\$")}</c:f><c:numCache>[\\s\\S]*?<c:ptCount val="\\d+"\\s*/>)([\\s\\S]*?)(</c:numCache>)`),
+      (t, a, b, c) => a + vals.map((v, i) => (v == null ? "" : `<c:pt idx="${i}"><c:v>${v}</c:v></c:pt>`)).join("") + c);
+  };
+  serie("Monopolo!$O$20:$O$24", xs.slice(0, n)); serie("Monopolo!$O$30:$O$34", ys.slice(0, n));
+  serie("Monopolo!$I$20:$I$24", alt); serie("Monopolo!$I$30:$I$34", alt);
+  poner("xl/charts/chart1.xml", g);
+  const nombre = `verticalidad-${String(o.codigo || "monopolo").replace(/[^\w-]+/g, "")}-${String(m.fecha || hoy()).slice(0, 10)}.xlsx`;
+  descargarZip(XLSX, zip, nombre);
+  return nombre;
+}
+// Mástil: el libro tiene las dos hojas, T0 (tensiones) y V1 (verticalidad). Se completa la de esta medición y,
+// si hay una medición del otro tipo del mismo día para esta estructura, también la otra.
+async function exportarMastil(m, o) {
+  const { XLSX, zip, leer, poner } = await abrirPlantilla("plantillas/mastil.xlsx");
+  const otra = (MD.todas || []).find((x) => x.tipo !== m.tipo && x.tipo !== "verticalidad_monopolo" && String(x.fecha).slice(0, 10) === String(m.fecha).slice(0, 10));
+  const vert = m.tipo === "verticalidad_mastil" ? m : otra, ten = m.tipo === "tension_riendas" ? m : otra;
+  const d = m.datos, fechaTxt = m.fecha ? fecha(String(m.fecha).slice(0, 10)) : "";
+  let t0 = leer("xl/worksheets/sheet1.xml"), v1 = leer("xl/worksheets/sheet2.xml");
+  // encabezados (los dos)
+  const altura = d.altura_txt || "";
+  for (const [ref, v] of Object.entries({ B10: d.estacion, B11: altura, B12: d.fabricante, B13: fechaTxt, B14: (ten || m).datos.instrumento,
+    D15: ten?.datos.vencimiento, B16: (ten || m).datos.responsable, C17: ten?.datos.viento })) t0 = ponerCelda(t0, ref, v || null);
+  for (const [ref, v] of Object.entries({ B12: d.estacion, B13: altura, B14: d.fabricante, B15: fechaTxt, B16: (vert || m).datos.instrumento,
+    B17: (vert || m).datos.responsable })) v1 = ponerCelda(v1, ref, v || null);
+  // verticalidad (V1): niveles en las filas 21–29 y la verificación entre pares en 55–67
+  if (vert) {
+    const dv = vert.datos, r = calcularMastil(dv), n = MAX_FILAS.mastil;
+    v1 = ponerCelda(v1, "K31", numeroCampo(dv.desplome_admisible));
+    v1 = ponerCelda(v1, "K32", numeroCampo(dv.medio_parante));
+    for (let i = 0; i < n; i++) {
+      const f = 21 + i, nv = dv.niveles[i], c = r.filas[i];
+      v1 = ponerCelda(v1, "A" + f, nv ? numeroCampo(nv.altura) : null);
+      v1 = ponerCelda(v1, "B" + f, nv ? numeroCampo(nv.A) : null);
+      // en medios parantes: lo leído va en «completar en sitio» (M–O) y en cm en D1–D3 (C–E)
+      const fac = factorMastil(dv), crudo = nv ? nv.D.map(numeroCampo) : [null, null, null];
+      ["C", "D", "E"].forEach((col, k) => (v1 = ponerCelda(v1, col + f, crudo[k] != null && fac != null ? crudo[k] * fac : null)));
+      ["M", "N", "O"].forEach((col, k) => (v1 = ponerCelda(v1, col + f, dv.unidad === "parante" ? crudo[k] : null)));
+      const ok = c && !c.falta;
+      v1 = ponerCelda(v1, "F" + f, ok ? c.d : nv ? 0 : null); v1 = ponerCelda(v1, "G" + f, ok ? c.e : nv ? 0 : null);
+      v1 = ponerCelda(v1, "H" + f, ok ? c.a : nv ? 0 : null); v1 = ponerCelda(v1, "I" + f, ok ? c.x : nv ? 0 : null);
+      v1 = ponerCelda(v1, "J" + f, ok ? c.y : nv ? 0 : null); v1 = ponerCelda(v1, "K" + f, ok ? c.r : nv ? 0 : null);
+      // tabla de verificación
+      const hh = nv ? numeroCampo(nv.altura) : null, x = ok ? c.x : nv ? 0 : null, y = ok ? c.y : nv ? 0 : null;
+      v1 = ponerCelda(v1, "A" + (59 + i), hh); v1 = ponerCelda(v1, "B" + (59 + i), x); v1 = ponerCelda(v1, "C" + (59 + i), y);
+      const col = String.fromCharCode(69 + i); // E…M
+      v1 = ponerCelda(v1, col + 55, hh); v1 = ponerCelda(v1, col + 56, y); v1 = ponerCelda(v1, col + 57, x);
+    }
+    const P = r.filas.map((c, i) => ({ h: dv.niveles[i] ? numeroCampo(dv.niveles[i].altura) : null, x: c.falta ? 0 : c.x, y: c.falta ? 0 : c.y }));
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+      if (i === j) continue;
+      const a = P[i], b = P[j], col = String.fromCharCode(69 + j);
+      const ok = a && b && a.h != null && b.h != null && a.h !== b.h;
+      v1 = ponerCelda(v1, col + (59 + i), ok ? Math.abs(Math.hypot(a.x - b.x, a.y - b.y) / (a.h - b.h)) / 100 : null);
+    }
+  }
+  // tensiones (T0): anclajes desde las filas 23, 35 y 47, diez riendas cada uno
+  if (ten) {
+    const dt = ten.datos, tol = (numeroCampo(dt.tolerancia) ?? 30) / 100;
+    t0 = ponerCelda(t0, "D23", -tol); t0 = ponerCelda(t0, "E23", tol);
+    [23, 35, 47].forEach((f0, ia) => {
+      const a = dt.anclajes[ia];
+      if (a) t0 = ponerCelda(t0, "A" + f0, `Anclaje ${a.nombre}`);
+      for (let i = 0; i < MAX_FILAS.riendas; i++) {
+        const f = f0 + 1 + i, x = a?.riendas[i];
+        const nom = x ? numeroCampo(x.nominal) : null, L = x ? x.L.map(numeroCampo) : [null, null, null];
+        t0 = ponerCelda(t0, "A" + f, x ? (/^\d+$/.test(x.nombre) ? Number(x.nombre) : x.nombre) : null);
+        t0 = ponerCelda(t0, "B" + f, x ? x.tipo : null);
+        t0 = ponerCelda(t0, "C" + f, nom);
+        ["F", "G", "H"].forEach((c, k) => (t0 = ponerCelda(t0, c + f, L[k] ?? null)));
+        const prom = x ? L.reduce((s, v) => s + (v || 0), 0) / 3 : null;   // igual que la planilla: (L1+L2+L3)/3
+        t0 = ponerCelda(t0, "D" + f, nom != null ? nom * (1 - tol) : null); t0 = ponerCelda(t0, "E" + f, nom != null ? nom * (1 + tol) : null);
+        t0 = ponerCelda(t0, "I" + f, prom); t0 = ponerCelda(t0, "J" + f, nom ? (prom / nom - 1) * 100 : null);
+      }
+    });
+  }
+  poner("xl/worksheets/sheet1.xml", sinErroresViejos(t0));
+  poner("xl/worksheets/sheet2.xml", sinErroresViejos(v1));
+  const nombre = `${ten && vert ? "verticalidad-y-tensiones" : vert ? "verticalidad" : "tensiones"}-${String(o.codigo || "mastil").replace(/[^\w-]+/g, "")}-${String(m.fecha || hoy()).slice(0, 10)}.xlsx`;
+  descargarZip(XLSX, zip, nombre);
+  return nombre;
 }

@@ -158,6 +158,18 @@ async function crearNeon() {
         ? "Falta preparar la base para las mediciones: corré sql/parte25_mediciones.sql en Neon y tocá Refresh schema cache." : "Guardar medición: " + error.message);
     },
     async borrarMedicion(id) { chequear(await neon.rpc("borrar_medicion", { p_id: id }), "Borrar medición"); },
+    // Perfiles de modelos (sql/parte26_perfiles.sql)
+    async perfiles() {
+      const { data, error } = await neon.rpc("perfiles_lista");
+      if (error) throw new Error(/perfiles_lista|schema cache|could not find/i.test(error.message) ? "FALTA_PARTE26" : "Perfiles: " + error.message);
+      return data || [];
+    },
+    async guardarPerfil(p) {
+      const { error } = await neon.rpc("guardar_perfil", { p_id: p.id, p_nombre: p.nombre, p_tipo: p.tipo, p_datos: p.datos });
+      if (error) throw new Error(/guardar_perfil|schema cache|could not find/i.test(error.message)
+        ? "Falta preparar la base para los perfiles: corré sql/parte26_perfiles.sql en Neon y tocá Refresh schema cache." : "Guardar perfil: " + error.message);
+    },
+    async borrarPerfil(id) { chequear(await neon.rpc("borrar_perfil", { p_id: id }), "Borrar perfil"); },
     hayCarpetasDrive: !!DRIVE_CARPETAS_URL,
     async carpetaDrive(codigo) {
       const token = (await neon.auth.getSession())?.data?.session?.token;
@@ -214,6 +226,20 @@ async function crearNeon() {
     },
   };
 }
+
+// Perfiles con los que viene la web (los mismos que carga sql/parte26_perfiles.sql)
+export const PERFILES_BASE = [
+  { id: "6c0d5d2e-0001-4a3e-9a51-000000000040", nombre: "Monopolo MP40 (40 m)", tipo: "monopolo",
+    datos: { fabricante: "", altura_m: 40, tramos: [{ nombre: "1", ancho: 134, altura: 0 }, { nombre: "2", ancho: 116, altura: 900 },
+      { nombre: "3", ancho: 97.3, altura: 1834 }, { nombre: "4", ancho: 75.5, altura: 2872 }, { nombre: "Tope", ancho: 50.6, altura: 4000 }] } },
+  { id: "6c0d5d2e-0002-4a3e-9a51-000000000100", nombre: "Mástil Mingyuan/Ciemsa-Prosecco 100 m", tipo: "mastil",
+    datos: { fabricante: "Mingyuan/Ciemsa-Prosecco", altura_m: 100, medio_parante: "", desplome_admisible: "",
+      niveles: [1.9, 14.5, 28.9, 41.5, 54.7, 69.1, 84.7, 96.7, 100].map((altura) => ({ altura, A: 120 })),
+      tolerancia: 30, anclajes: ["A", "B", "C"],
+      riendas: [["1", "1/2 19h", 1280], ["2", "1/2 19h", 1280], ["3", "1/2 19h", 1280], ["4", "1/2 19h", 1280], ["5", "1/2 19h", 1280],
+        ["6", "5/8 19h", 1930], ["7d", "5/8 19h", 1930], ["7i", "5/8 19h", 1930], ["8d", "5/8 19h", 1930], ["8i", "5/8 19h", 1930]]
+        .map(([nombre, tipo, nominal]) => ({ nombre, tipo, nominal })) } },
+];
 
 // ---------------------------------------------------------------- demostración
 function crearDemo() {
@@ -280,6 +306,7 @@ function crearDemo() {
       antes: null, despues: { tipo: "VISITA", texto: "Visita: falta la puesta a tierra" }, deshecho: true, deshecho_por: "Gonza", deshecho_cuando: hace(1400) },
   ];
   const mediciones = [];
+  const perfilesDemo = structuredClone(PERFILES_BASE);
   let hid = 1, cid = 1;
   const hitos = [], cuaderno = [];
   for (const [tipo, lista] of [["estructura", est], ["obra", obr]]) {
@@ -354,6 +381,13 @@ function crearDemo() {
       if (i >= 0) mediciones[i] = { ...mediciones[i], ...fila }; else mediciones.push({ ...fila, creado: new Date().toISOString() });
     },
     async borrarMedicion(id) { await espera(); const i = mediciones.findIndex((x) => x.id === id); if (i >= 0) mediciones.splice(i, 1); },
+    async perfiles() { await espera(); return structuredClone(perfilesDemo); },
+    async guardarPerfil(p) {
+      await espera();
+      const i = perfilesDemo.findIndex((x) => x.id === p.id);
+      if (i >= 0) perfilesDemo[i] = structuredClone(p); else perfilesDemo.push(structuredClone(p));
+    },
+    async borrarPerfil(id) { await espera(); const i = perfilesDemo.findIndex((x) => x.id === id); if (i >= 0) perfilesDemo.splice(i, 1); },
     hayCarpetasDrive: true,
     async carpetaAPapelera() { await espera(); return { ok: true }; },
     async carpetaDrive(codigo) { await espera(); return { url: `https://drive.google.com/drive/folders/demo-${encodeURIComponent(codigo)}`, nueva: true }; },
