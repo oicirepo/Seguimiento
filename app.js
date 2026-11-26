@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-11";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-12";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5416,7 +5416,7 @@ const MED_TIPO = {
   tension_riendas: { titulo: "Tensión de riendas", estructura: "mastil" },
 };
 // lugares que tiene cada planilla (si un perfil tiene más, el Excel muestra solo estos)
-const MAX_FILAS = { monopolo: 5, mastil: 9, riendas: 10 };
+const MAX_FILAS = { monopolo: 5, mastil: 30, riendas: 30 };   // mástil: la planilla se arma con las filas que haya
 const LADOS = ["lado1", "lado2"];
 const CLAVE_BORRADORES = "obras-oici-mediciones-v1" + (DEMO ? "-demo" : "");
 const CLAVE_PERFILES = "obras-oici-perfiles-v1" + (DEMO ? "-demo" : "");
@@ -5930,10 +5930,10 @@ function datosHtml(m, puede) {
       ${campo("responsable", "Responsable")}${m.tipo === "tension_riendas" ? campo("viento", "Indicaciones: viento") : ""}`;
     sitio = m.tipo === "verticalidad_mastil"
       ? `<div class="dos">${campo("medio_parante", "Medida de medio parante (cm)", 'inputmode="decimal"')}${campo("desplome_admisible", "Desplome máx. admisible (cm)", 'inputmode="decimal"')}</div>
-        <h3>Niveles</h3><p class="nota">Altura de cada nivel y A, el ancho de la cara (completar en sitio). La planilla tiene lugar para ${MAX_FILAS.mastil}.</p>
+        <h3>Niveles</h3><p class="nota">Altura de cada nivel y A, el ancho de la cara (completar en sitio). La planilla se arma con los niveles que cargues.</p>
         ${tablaFilas("niveles", d.niveles, [["altura", "Altura (m)"], ["A", "A (cm)"]], dis)}`
       : `${campo("tolerancia", "Tolerancia (± %)", 'inputmode="decimal"')}
-        <h3>Riendas</h3><p class="nota">Las mismas en los tres anclajes. La planilla tiene lugar para ${MAX_FILAS.riendas} por anclaje.</p>
+        <h3>Riendas</h3><p class="nota">Las mismas en los tres anclajes. La planilla se arma con las riendas que cargues.</p>
         ${tablaFilas("riendas", d.anclajes[0].riendas, [["nombre", "Rienda", "text"], ["tipo", "Tipo", "text"], ["nominal", "Lectura de referencia"]], dis)}`;
   }
   return `<div class="form med-datos">
@@ -6295,7 +6295,7 @@ async function exportarMedicion(m, o, boton) {
   const original = boton?.textContent;
   if (boton) { boton.disabled = true; boton.textContent = "Armando…"; }
   try {
-    const nombre = await (m.tipo === "verticalidad_monopolo" ? exportarVerticalidad(m, o) : exportarMastil(m, o));
+    const nombre = await (m.tipo === "verticalidad_monopolo" ? exportarVerticalidad(m, o) : m.tipo === "verticalidad_mastil" ? exportarVerticalidadMastil(m, o) : exportarRiendas(m, o));
     aviso("Planilla lista: se descargó " + nombre);
   } catch (e) {
     aviso("No se pudo armar la planilla: " + (sinRed(e) ? "sin conexión (abrí la planilla una vez con señal para que quede guardada)" : e.message), true, 9000);
@@ -6363,74 +6363,101 @@ async function exportarVerticalidad(m, o) {
   descargarZip(XLSX, zip, nombre);
   return nombre;
 }
-// Mástil: el libro tiene las dos hojas, T0 (tensiones) y V1 (verticalidad). Se completa la de esta medición y,
-// si hay una medición del otro tipo del mismo día para esta estructura, también la otra.
-async function exportarMastil(m, o) {
-  const { XLSX, zip, leer, poner } = await abrirPlantilla("plantillas/mastil.xlsx");
-  const otra = (MD.todas || []).find((x) => x.tipo !== m.tipo && x.tipo !== "verticalidad_monopolo" && String(x.fecha).slice(0, 10) === String(m.fecha).slice(0, 10));
-  const vert = m.tipo === "verticalidad_mastil" ? m : otra, ten = m.tipo === "tension_riendas" ? m : otra;
-  const d = m.datos, fechaTxt = m.fecha ? fecha(String(m.fecha).slice(0, 10)) : "";
-  let t0 = leer("xl/worksheets/sheet1.xml"), v1 = leer("xl/worksheets/sheet2.xml");
-  // encabezados (los dos)
-  const altura = d.altura_txt || "";
-  for (const [ref, v] of Object.entries({ B10: d.estacion, B11: altura, B12: d.fabricante, B13: fechaTxt, B14: (ten || m).datos.instrumento,
-    D15: ten?.datos.vencimiento, B16: (ten || m).datos.responsable, C17: ten?.datos.viento })) t0 = ponerCelda(t0, ref, v || null);
-  for (const [ref, v] of Object.entries({ B12: d.estacion, B13: altura, B14: d.fabricante, B15: fechaTxt, B16: (vert || m).datos.instrumento,
-    B17: (vert || m).datos.responsable })) v1 = ponerCelda(v1, ref, v || null);
-  // verticalidad (V1): niveles en las filas 21–29 y la verificación entre pares en 55–67
-  if (vert) {
-    const dv = vert.datos, r = calcularMastil(dv), n = MAX_FILAS.mastil;
-    v1 = ponerCelda(v1, "K31", numeroCampo(dv.desplome_admisible));
-    v1 = ponerCelda(v1, "K32", numeroCampo(dv.medio_parante));
-    for (let i = 0; i < n; i++) {
-      const f = 21 + i, nv = dv.niveles[i], c = r.filas[i];
-      v1 = ponerCelda(v1, "A" + f, nv ? numeroCampo(nv.altura) : null);
-      v1 = ponerCelda(v1, "B" + f, nv ? numeroCampo(nv.A) : null);
-      // en medios parantes: lo leído va en «completar en sitio» (M–O) y en cm en D1–D3 (C–E)
-      const fac = factorMastil(dv), crudo = nv ? nv.D.map(numeroCampo) : [null, null, null];
-      ["C", "D", "E"].forEach((col, k) => (v1 = ponerCelda(v1, col + f, crudo[k] != null && fac != null ? crudo[k] * fac : null)));
-      ["M", "N", "O"].forEach((col, k) => (v1 = ponerCelda(v1, col + f, crudo[k])));
-      const ok = c && !c.falta;
-      v1 = ponerCelda(v1, "F" + f, ok ? c.d : nv ? 0 : null); v1 = ponerCelda(v1, "G" + f, ok ? c.e : nv ? 0 : null);
-      v1 = ponerCelda(v1, "H" + f, ok ? c.a : nv ? 0 : null); v1 = ponerCelda(v1, "I" + f, ok ? c.x : nv ? 0 : null);
-      v1 = ponerCelda(v1, "J" + f, ok ? c.y : nv ? 0 : null); v1 = ponerCelda(v1, "K" + f, ok ? c.r : nv ? 0 : null);
-      // tabla de verificación
-      const hh = nv ? numeroCampo(nv.altura) : null, x = ok ? c.x : nv ? 0 : null, y = ok ? c.y : nv ? 0 : null;
-      v1 = ponerCelda(v1, "A" + (59 + i), hh); v1 = ponerCelda(v1, "B" + (59 + i), x); v1 = ponerCelda(v1, "C" + (59 + i), y);
-      const col = String.fromCharCode(69 + i); // E…M
-      v1 = ponerCelda(v1, col + 55, hh); v1 = ponerCelda(v1, col + 56, y); v1 = ponerCelda(v1, col + 57, x);
-    }
-    const P = r.filas.map((c, i) => ({ h: dv.niveles[i] ? numeroCampo(dv.niveles[i].altura) : null, x: c.falta ? 0 : c.x, y: c.falta ? 0 : c.y }));
-    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-      if (i === j) continue;
-      const a = P[i], b = P[j], col = String.fromCharCode(69 + j);
-      const ok = a && b && a.h != null && b.h != null && a.h !== b.h;
-      v1 = ponerCelda(v1, col + (59 + i), ok ? Math.abs(Math.hypot(a.x - b.x, a.y - b.y) / (a.h - b.h)) / 100 : null);
-    }
-  }
-  // tensiones (T0): anclajes desde las filas 23, 35 y 47, diez riendas cada uno
-  if (ten) {
-    const dt = ten.datos, tol = (numeroCampo(dt.tolerancia) ?? 30) / 100;
-    t0 = ponerCelda(t0, "D23", -tol); t0 = ponerCelda(t0, "E23", tol);
-    [23, 35, 47].forEach((f0, ia) => {
-      const a = dt.anclajes[ia];
-      if (a) t0 = ponerCelda(t0, "A" + f0, `Anclaje ${a.nombre}`);
-      for (let i = 0; i < MAX_FILAS.riendas; i++) {
-        const f = f0 + 1 + i, x = a?.riendas[i];
-        const nom = x ? numeroCampo(x.nominal) : null, L = x ? x.L.map(numeroCampo) : [null, null, null];
-        t0 = ponerCelda(t0, "A" + f, x ? (/^\d+$/.test(x.nombre) ? Number(x.nombre) : x.nombre) : null);
-        t0 = ponerCelda(t0, "B" + f, x ? x.tipo : null);
-        t0 = ponerCelda(t0, "C" + f, nom);
-        ["F", "G", "H"].forEach((c, k) => (t0 = ponerCelda(t0, c + f, L[k] ?? null)));
-        const prom = x ? L.reduce((s, v) => s + (v || 0), 0) / 3 : null;   // igual que la planilla: (L1+L2+L3)/3
-        t0 = ponerCelda(t0, "D" + f, nom != null ? nom * (1 - tol) : null); t0 = ponerCelda(t0, "E" + f, nom != null ? nom * (1 + tol) : null);
-        t0 = ponerCelda(t0, "I" + f, prom); t0 = ponerCelda(t0, "J" + f, nom ? (prom / nom - 1) * 100 : null);
-      }
+// Mástil: cada medición se exporta en su propio libro, de una sola hoja, armado con las filas que tenga
+// (riendas por anclaje o niveles). Formato, logo, dibujos y fórmulas son los de la planilla original (T0 y V1).
+const letraCol = (n) => (n > 26 ? letraCol(Math.floor((n - 1) / 26)) : "") + String.fromCharCode(65 + ((n - 1) % 26));
+const finito = (v) => (typeof v === "number" && isFinite(v) ? v : null);
+function celdaXml(ref, s, v, f) {
+  const xml = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const fx = f ? `<f>${xml(f)}</f>` : "";
+  if (v == null || v === "") return fx ? `<c r="${ref}" s="${s}">${fx}</c>` : `<c r="${ref}" s="${s}"/>`;
+  if (typeof v === "number") return `<c r="${ref}" s="${s}">${fx}<v>${v}</v></c>`;
+  return fx ? `<c r="${ref}" s="${s}" t="str">${fx}<v>${xml(v)}</v></c>` : `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
+}
+// celdas: [[col, estilo, valor, fórmula], …]
+const filaXml = (f, celdas, extra = "") => `<row r="${f}" spans="1:26" ht="12.75" customHeight="1"${extra}>${celdas.map(([c, s, v, fx]) => celdaXml(c + f, s, v, fx)).join("")}</row>`;
+const nombreRienda = (n) => (/^\d+$/.test(String(n).trim()) ? Number(n) : n);
+const nombreArchivo = (pre, o, m) => `${pre}-${String(o.codigo || "mastil").replace(/[^\w-]+/g, "")}-${String(m.fecha || hoy()).slice(0, 10)}.xlsx`;
+
+async function exportarRiendas(m, o) {
+  const { XLSX, zip, leer, poner } = await abrirPlantilla("plantillas/mastil-riendas.xlsx");
+  const d = m.datos, tol = (numeroCampo(d.tolerancia) ?? 30) / 100;
+  let h = leer("xl/worksheets/sheet1.xml");
+  for (const [ref, v] of Object.entries({ B10: d.estacion, B11: d.altura_txt, B12: d.fabricante, B13: m.fecha ? fecha(String(m.fecha).slice(0, 10)) : "",
+    B14: d.instrumento, D15: d.vencimiento, B16: d.responsable, C17: d.viento })) h = ponerCelda(h, ref, v || null);
+  const filas = [], cf = [];
+  let f = 23;
+  d.anclajes.forEach((a) => {
+    filas.push(filaXml(f, [["A", 68, `Anclaje ${a.nombre}`], ["B", 69, "Tipo de rienda"], ["C", 69, "Lectura"], ["D", 70, -tol], ["E", 70, tol],
+      ["F", 69, "L1"], ["G", 69, "L2"], ["H", 69, "L3"], ["I", 69, "Promedio"], ["J", 71, "Error (%)"]]));
+    const f1 = ++f;
+    a.riendas.forEach((x, i) => {
+      const ult = i === a.riendas.length - 1, [sA, s, sJ] = ult ? [76, 77, 78] : [72, 74, 75];
+      const nom = numeroCampo(x.nominal), L = x.L.map(numeroCampo), prom = L.reduce((t, v) => t + (v || 0), 0) / 3;
+      filas.push(filaXml(f, [["A", sA, nombreRienda(x.nombre)], ["B", ult ? 77 : 73, x.tipo || null], ["C", s, nom],
+        ["D", s, nom != null ? nom * (1 - tol) : null, `+C${f}*(1+$D$23)`], ["E", s, nom != null ? nom * (1 + tol) : null, `+C${f}*(1+$E$23)`],
+        ["F", s, L[0]], ["G", s, L[1]], ["H", s, L[2]], ["I", s, prom, `+(F${f}+G${f}+H${f})/3`],
+        ["J", sJ, nom ? (prom / nom - 1) * 100 : null, `+((I${f}/C${f})-1)*100`]], ult ? ' thickBot="1"' : ""));
+      f++;
     });
-  }
-  poner("xl/worksheets/sheet1.xml", sinErroresViejos(t0));
-  poner("xl/worksheets/sheet2.xml", sinErroresViejos(v1));
-  const nombre = `${ten && vert ? "verticalidad-y-tensiones" : vert ? "verticalidad" : "tensiones"}-${String(o.codigo || "mastil").replace(/[^\w-]+/g, "")}-${String(m.fecha || hoy()).slice(0, 10)}.xlsx`;
+    // promedio fuera de la lectura ±tolerancia: en rojo (promedio y error)
+    if (a.riendas.length) cf.push(`<conditionalFormatting sqref="I${f1}:J${f - 1}"><cfRule type="expression" dxfId="0" priority="${cf.length + 1}"><formula>AND($I${f1}&gt;0,OR($I${f1}&lt;$D${f1},$I${f1}&gt;$E${f1}))</formula></cfRule></conditionalFormatting>`);
+    filas.push(filaXml(f, [["F", 19], ["G", 19], ["H", 19], ["J", 20]]));
+    f++;
+  });
+  h = h.replace("</sheetData>", filas.join("") + "</sheetData>").replace(/<dimension ref="[^"]*"\s*\/>/, `<dimension ref="A1:Z${f}"/>`)
+    .replace("<pageMargins", cf.join("") + "<pageMargins");
+  poner("xl/worksheets/sheet1.xml", h);
+  const nombre = nombreArchivo("tensiones-riendas", o, m);
+  descargarZip(XLSX, zip, nombre);
+  return nombre;
+}
+
+async function exportarVerticalidadMastil(m, o) {
+  const { XLSX, zip, leer, poner } = await abrirPlantilla("plantillas/mastil-verticalidad.xlsx");
+  const d = m.datos, N = d.niveles.length, dz = N - 9;   // la original tiene 9 niveles: lo de abajo se corre dz filas
+  let h = leer("xl/worksheets/sheet1.xml");
+  for (const [ref, v] of Object.entries({ B12: d.estacion, B13: d.altura_txt, B14: d.fabricante, B15: m.fecha ? fecha(String(m.fecha).slice(0, 10)) : "",
+    B16: d.instrumento, B17: d.responsable })) h = ponerCelda(h, ref, v || null);
+  const filasPl = [...h.matchAll(/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g)];
+  const cab = filasPl.filter((x) => +x[1] <= 20).map((x) => x[0]).join("");
+  let pie = filasPl.filter((x) => +x[1] >= 30).map((x) => x[0].replace(/<row r="(\d+)"/, (t, n) => `<row r="${+n + dz}"`)
+    .replace(/<c r="([A-Z]+)(\d+)"/g, (t, c, n) => `<c r="${c}${+n + dz}"`)).join("");
+  const fK = 32 + dz, fac = numeroCampo(d.medio_parante) ?? 0;
+  // niveles (desde la fila 21). C–E en cm = lectura en medios parantes (M–O) × medida del medio parante (K32)
+  const P = [], niveles = d.niveles.map((nv, i) => {
+    const f = 21 + i, hh = numeroCampo(nv.altura), A = numeroCampo(nv.A), q = nv.D.map(numeroCampo), [c1, c2, c3] = q.map((v) => (v ?? 0) * fac);
+    const dm = (c1 + c2 + c3) / 3, e = A ? (dm * Math.sqrt(3)) / A : null, a = e != null && Math.abs(e) <= 1 ? (Math.asin(e) * 180) / Math.PI : null;
+    const x = (c2 - c3) / Math.sqrt(3), y = (2 * c1 - c2 - c3) / 3;
+    P.push({ h: hh, x, y });
+    return filaXml(f, [["A", 67, hh], ["B", 36, A],
+      ["C", 37, c1, `M${f}*$K$${fK}`], ["D", 37, c2, `N${f}*$K$${fK}`], ["E", 37, c3, `O${f}*$K$${fK}`],
+      ["F", 36, dm, `(C${f}+D${f}+E${f})/3`], ["G", 38, finito(e), `F${f}*SQRT(3)/B${f}`], ["H", 39, finito(a), `DEGREES(ASIN(G${f}))`],
+      ["I", 39, x, `(D${f}-E${f})/SQRT(3)`], ["J", 39, y, `(2*C${f}-D${f}-E${f})/3`], ["K", 40, Math.hypot(x, y), `SQRT((I${f}*I${f}+J${f}*J${f}))`],
+      ["L", 11], ["M", 41, q[0]], ["N", 41, q[1]], ["O", 41, q[2]]]);
+  });
+  // verificación entre pares de niveles (inclinación entre puntos ≤ 0,25 %)
+  const fb = 55 + dz, fi = fb + 4, col = (j) => letraCol(5 + j), ultCol = col(N - 1);
+  const enc = (fila, et, sEt, sv, k, ref) => filaXml(fila, [["A", 51], ["B", 51], ["C", 11], ["D", sEt, et],
+    ...P.map((p, j) => [col(j), sv, p[k], `+${ref}${fi + j}`])]);
+  const matriz = [enc(fb, "h", 52, 53, "h", "A"), enc(fb + 1, "Y", 54, 55, "y", "C"), enc(fb + 2, "X", 58, 55, "x", "B"),
+    filaXml(fb + 3, [["A", 59, "h"], ["B", 60, "X"], ["C", 61, "Y"], ["D", 51], ...P.map((p, j) => [col(j), 63])]),
+    ...P.map((p, i) => { const f = fi + i; return filaXml(f, [["A", 53, p.h, `+A${21 + i}`], ["B", 55, p.x, `+I${21 + i}`], ["C", 55, p.y, `+J${21 + i}`], ["D", i === 0 || i === N - 1 ? 51 : 66],
+      ...P.map((q, j) => { const c = col(j);
+        if (i === j) return [c, 64];
+        const v = p.h != null && q.h != null && p.h !== q.h ? Math.abs(Math.hypot(p.x - q.x, p.y - q.y) / (p.h - q.h)) / 100 : null;
+        return [c, 65, v, `+ABS(SQRT((B${f}-${c}$${fb + 2})^2+(C${f}-${c}$${fb + 1})^2)/(A${f}-${c}$${fb}))/100`]; })]); })];
+  h = h.replace(/<sheetData>[\s\S]*<\/sheetData>/, `<sheetData>${cab}${niveles.join("")}${pie}${matriz.join("")}</sheetData>`);
+  h = ponerCelda(h, "K" + (31 + dz), numeroCampo(d.desplome_admisible));
+  h = ponerCelda(h, "K" + fK, numeroCampo(d.medio_parante));
+  const cf = `<conditionalFormatting sqref="H21:H${20 + N}"><cfRule type="cellIs" dxfId="0" priority="2" stopIfTrue="1" operator="greaterThan"><formula>5</formula></cfRule></conditionalFormatting>`
+    + `<conditionalFormatting sqref="E${fi}:${ultCol}${fi + N - 1}"><cfRule type="cellIs" dxfId="1" priority="1" stopIfTrue="1" operator="greaterThan"><formula>0.0025</formula></cfRule></conditionalFormatting>`;
+  h = h.replace(/<dimension ref="[^"]*"\s*\/>/, `<dimension ref="A1:Z${fi + N - 1}"/>`).replace("<pageMargins", cf + "<pageMargins");
+  poner("xl/worksheets/sheet1.xml", h);
+  // el dibujo de la planilla y las notas de abajo bajan (o suben) con la tabla
+  poner("xl/drawings/drawing1.xml", leer("xl/drawings/drawing1.xml").replace(/(<xdr:from><xdr:col>\d+<\/xdr:col><xdr:colOff>-?\d+<\/xdr:colOff><xdr:row>)(\d+)(<\/xdr:row>)/g,
+    (t, a, n, b) => a + (+n >= 29 ? +n + dz : n) + b));
+  const nombre = nombreArchivo("verticalidad-mastil", o, m);
   descargarZip(XLSX, zip, nombre);
   return nombre;
 }
