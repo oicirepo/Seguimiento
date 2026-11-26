@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-16";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-17";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5455,10 +5455,16 @@ async function cargarPerfiles(forzar) {
   return MD.perfiles;
 }
 // el perfil que más le corresponde a una estructura: el de su tipo con la misma altura, o el primero de su tipo
-function perfilSugerido(o, perfiles) {
-  const t = tipoEstructura(o), h = alturaMetros(o);
-  const delTipo = perfiles.filter((p) => p.tipo === t);
-  return delTipo.find((p) => h != null && Number(p.datos.altura_m) === h) || delTipo[0] || null;
+// versión del perfil de mástil: «basica» (riendas y antirrotor) o «completa» (todos los empalmes)
+const versionDe = (p) => (p?.tipo === "mastil" && p?.datos?.version === "completa" ? "completa" : "basica");
+const licitacionesDe = (p) => String(p?.datos?.licitaciones || "").split(/[,;\s]+/).map(normal).filter(Boolean);
+// el modelo de cada estructura sale de su licitación (y su altura); si ningún perfil tiene esa licitación, por la altura
+function perfilSugerido(o, perfiles, version = "basica") {
+  const t = tipoEstructura(o), h = alturaMetros(o), lic = normal(o.licitacion);
+  const cand = perfiles.filter((p) => p.tipo === t && (t === "monopolo" || versionDe(p) === version));
+  const deLic = (p) => lic && licitacionesDe(p).includes(lic), deAlt = (p) => h != null && Number(p.datos.altura_m) === h;
+  const conLic = cand.filter(deLic);
+  return conLic.find(deAlt) || (conLic.length ? null : cand.find(deAlt)) || conLic[0] || (version === "basica" ? cand[0] : null) || null;
 }
 
 // ---- datos de una medición nueva, desde el perfil (o desde la medición anterior de la misma estructura)
@@ -5484,7 +5490,7 @@ function filasDePerfil(tipo, perfil, o) {
 function nuevaMedicion(o, tipo, perfil, anterior) {
   const dep = (departamentoDe(Number(o.lat), Number(o.lon)) || "").toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase());
   const h = perfil?.datos?.altura_m || alturaMetros(o);
-  const comunes = { perfil_id: perfil?.id || null, perfil_nombre: perfil?.nombre || "", fabricante: perfil?.datos?.fabricante || "",
+  const comunes = { perfil_id: perfil?.id || null, perfil_nombre: perfil?.nombre || "", version: versionDe(perfil), fabricante: perfil?.datos?.fabricante || "",
     radiobase: o.codigo || "", estacion: o.codigo || "", departamento: dep, altura_txt: h ? `${numero(h, 0)} mts` : "",
     instrumento: "", observaciones: "", licitacion: o.licitacion || "", empresa: "", representante: "", firma: "",
     responsable: "", vencimiento: "", viento: "" };
@@ -5512,7 +5518,7 @@ function aplicarPerfil(m, perfil, o) {
   if (m.tipo === "verticalidad_mastil") nuevo.niveles.forEach((n, i) => { if (viejo.niveles?.[i]) n.D = viejo.niveles[i].D; });
   if (m.tipo === "tension_riendas") nuevo.anclajes.forEach((a, i) => a.riendas.forEach((r, j) => { const v = viejo.anclajes?.[i]?.riendas?.[j]; if (v) r.L = v.L; }));
   const h = perfil.datos?.altura_m;
-  Object.assign(m.datos, nuevo, { perfil_id: perfil.id, perfil_nombre: perfil.nombre, fabricante: perfil.datos?.fabricante || m.datos.fabricante,
+  Object.assign(m.datos, nuevo, { perfil_id: perfil.id, perfil_nombre: perfil.nombre, version: versionDe(perfil), fabricante: perfil.datos?.fabricante || m.datos.fabricante,
     altura_txt: h ? `${numero(h, 0)} mts` : m.datos.altura_txt });
 }
 
@@ -5682,7 +5688,9 @@ async function abrirMediciones(o, tipo) {
   const def = MED_TIPO[tipo];
   p.innerHTML = `${barraMed(`${esc(def.titulo)} · ${esc(o.codigo)}`, "Volver", `<button class="boton boton-chico" type="button" id="med-perfiles">Perfiles</button>`)}
     <div class="med-cuerpo">
-      ${editor() ? `<button class="boton boton-primario med-nueva" type="button" id="med-nueva">+ Nueva medición</button>` : ""}
+      ${editor() ? (tipo === "verticalidad_mastil"
+        ? `<div class="dos"><button class="boton boton-primario med-nueva" type="button" id="med-nueva">+ Nueva (riendas y antirrotor)</button><button class="boton boton-primario med-nueva" type="button" id="med-nueva-completa">+ Nueva completa (con empalmes)</button></div>`
+        : `<button class="boton boton-primario med-nueva" type="button" id="med-nueva">+ Nueva medición</button>`) : ""}
       <ul class="med-lista" id="med-lista"><li class="nota">Cargando…</li></ul>
     </div>`;
   p.querySelector("[data-volver]").onclick = cerrarMedicion;
@@ -5696,12 +5704,16 @@ async function abrirMediciones(o, tipo) {
   for (const m of [...guardadas, ...pend, ...borr]) porId.set(m.id, { ...porId.get(m.id), ...m });
   MD.todas = [...porId.values()];
   MD.lista = MD.todas.filter((m) => m.tipo === tipo).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)) || String(b.creado || "").localeCompare(String(a.creado || "")));
-  $("#med-nueva")?.addEventListener("click", async () => {
+  const nueva = async (version) => {
     const perfiles = await cargarPerfiles();
-    const anterior = MD.lista.find((m) => !m.borrador || m.creado);
-    const perfil = perfiles.find((x) => x.id === anterior?.datos?.perfil_id) || perfilSugerido(o, perfiles);
+    // la anterior de la misma versión trae los datos del sitio; si no hay, el perfil del modelo de esta estructura
+    const anterior = MD.lista.find((m) => (!m.borrador || m.creado) && (tipo !== "verticalidad_mastil" || (m.datos.version || "basica") === version));
+    const perfil = perfiles.find((x) => x.id === anterior?.datos?.perfil_id) || perfilSugerido(o, perfiles, version);
+    if (version === "completa" && !perfil) return aviso("No hay un perfil completo (con empalmes) para el modelo de esta estructura. Crealo en Perfiles, con su licitación.", true, 9000);
     editarMedicion(nuevaMedicion(o, tipo, perfil, anterior));
-  });
+  };
+  $("#med-nueva")?.addEventListener("click", () => nueva("basica"));
+  $("#med-nueva-completa")?.addEventListener("click", () => nueva("completa"));
   const ul = $("#med-lista");
   if (!ul) return;
   ul.innerHTML = (aviso_ ? `<li class="nota">${esc(aviso_)}</li>` : "") + (MD.lista.length ? MD.lista.map((m) => {
@@ -6180,8 +6192,8 @@ async function abrirPerfiles(tipoEst, volver) {
   if (!ul) return;
   const orden = [...perfiles].sort((a, b) => (a.tipo === tipoEst ? -1 : 0) - (b.tipo === tipoEst ? -1 : 0) || a.nombre.localeCompare(b.nombre, "es"));
   ul.innerHTML = (MD.perfilesFalta ? `<li class="nota">Para guardar perfiles hay que correr sql/parte26_perfiles.sql en Neon. Mientras tanto se usan los que vienen con la web.</li>` : "")
-    + orden.map((x) => `<li><button type="button" data-perfil="${esc(x.id)}"><span><b>${esc(x.nombre)}</b> <span class="med-chip">${x.tipo === "monopolo" ? "Monopolo" : "Mástil"}</span></span>
-      <small>${esc(x.datos.fabricante || "sin fabricante")} · ${x.tipo === "monopolo" ? `${x.datos.tramos?.length || 0} tramos` : `${x.datos.niveles?.length || 0} niveles · ${x.datos.riendas?.length || 0} riendas por anclaje`}${x.autor ? ` · cambiado por ${esc(x.autor)}` : ""}</small></button></li>`).join("");
+    + orden.map((x) => `<li><button type="button" data-perfil="${esc(x.id)}"><span><b>${esc(x.nombre)}</b> <span class="med-chip">${x.tipo === "monopolo" ? "Monopolo" : versionDe(x) === "completa" ? "Mástil · completo" : "Mástil"}</span></span>
+      <small>${esc(x.datos.fabricante || "sin fabricante")}${x.datos.licitaciones ? ` · ${esc(x.datos.licitaciones)}` : ""} · ${x.tipo === "monopolo" ? `${x.datos.tramos?.length || 0} tramos` : `${x.datos.niveles?.length || 0} niveles · ${x.datos.riendas?.length || 0} riendas por anclaje`}${x.autor ? ` · cambiado por ${esc(x.autor)}` : ""}</small></button></li>`).join("");
   ul.querySelectorAll("[data-perfil]").forEach((b) => (b.onclick = () => editarPerfil(structuredClone(perfiles.find((x) => x.id === b.dataset.perfil)), () => abrirPerfiles(tipoEst, volver))));
   p.querySelectorAll("[data-nuevo]").forEach((b) => (b.onclick = () => editarPerfil(perfilVacio(b.dataset.nuevo), () => abrirPerfiles(tipoEst, volver))));
 }
@@ -6209,6 +6221,9 @@ function editarPerfil(pf, volver) {
       <label>Nombre<input id="pf-nombre" value="${esc(pf.nombre)}" placeholder="Ej. Mástil Mingyuan 100 m" ${dis}></label>
       <p class="nota">Planilla: <b>${pf.tipo === "monopolo" ? "verticalidad de monopolo" : "mástil (verticalidad y tensión de riendas)"}</b></p>
       <div class="dos">${campo("fabricante", "Fabricante")}${campo("altura_m", "Altura (m)", 'inputmode="decimal"')}</div>
+      ${campo("licitaciones", "Licitaciones con este modelo (separadas por coma)", 'placeholder="Ej. P104556" autocapitalize="characters"')}
+      <p class="nota">Las estructuras de esas licitaciones (y de esta altura) toman este perfil solas al empezar una medición.</p>
+      ${pf.tipo === "mastil" ? `<label>Versión<select data-pd-version ${dis}><option value="basica" ${versionDe(pf) === "basica" ? "selected" : ""}>Riendas y antirrotor</option><option value="completa" ${versionDe(pf) === "completa" ? "selected" : ""}>Completa: todos los empalmes</option></select></label>` : ""}
       ${pf.tipo === "monopolo"
         ? `<h3>Tramos</h3>${tablaFilas("tramos", d.tramos, [["nombre", "Tramo", "text"], ["ancho", "Ancho (cm)"], ["altura", "Altura (cm)"]], dis)}`
         : `<div class="dos">${campo("medio_parante", "Medio parante (cm)", 'inputmode="decimal"')}${campo("desplome_admisible", "Desplome admisible (cm)", 'inputmode="decimal"')}</div>
@@ -6222,6 +6237,7 @@ function editarPerfil(pf, volver) {
   volverAlScroll(p, vista, y);
   p.querySelector("[data-volver]").onclick = volver;
   p.querySelectorAll("[data-pd]").forEach((i) => (i.oninput = () => (d[i.dataset.pd] = i.value)));
+  p.querySelector("[data-pd-version]")?.addEventListener("change", (e) => (d.version = e.target.value));
   p.querySelector("[data-pd-anclajes]")?.addEventListener("input", (e) => (d.anclajes = e.target.value.split(/[,;\s]+/).filter(Boolean).slice(0, 3)));
   $("#pf-nombre")?.addEventListener("input", (e) => (pf.nombre = e.target.value));
   p.querySelector("[data-a-todos]")?.addEventListener("input", (e) => d.niveles.forEach((n) => (n.A = e.target.value)));
