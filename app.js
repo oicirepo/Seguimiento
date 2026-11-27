@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-18";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-19";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5417,7 +5417,22 @@ const MED_TIPO = {
 };
 // lugares que tiene cada planilla (si un perfil tiene más, el Excel muestra solo estos)
 // nombres sugeridos para los niveles del mástil (se puede escribir otro)
-const NOMBRES_NIVEL = ["Rienda", "Empalme", "Antirrotor", "Base"];
+const NOMBRES_NIVEL = ["Rienda", "Empalme", "Antirrotor", "Base", "Tope"];
+// opciones de nombre: las fijas más las que se escribieron en cualquier perfil o en esta tabla
+const nombresNivel = (filas = []) => {
+  const vistos = new Map(NOMBRES_NIVEL.map((x) => [x.toLowerCase(), x]));
+  for (const n of [...(MD.perfiles || []).flatMap((p) => p.datos?.niveles || []), ...filas]) {
+    const t = String(n?.nombre || "").trim();
+    if (t && !vistos.has(t.toLowerCase())) vistos.set(t.toLowerCase(), t);
+  }
+  return [...vistos.values()];
+};
+// al terminar de escribir un nombre nuevo, queda en la lista para las otras filas
+function sumarNombreNivel(inp) {
+  const t = inp.value.trim(), dl = document.getElementById("lista-niveles");
+  if (!t || !dl || [...dl.options].some((o) => o.value.toLowerCase() === t.toLowerCase())) return;
+  dl.append(Object.assign(document.createElement("option"), { value: t }));
+}
 // A (ancho de cara) es el mismo en todos los niveles: se carga una vez
 const campoA = (niveles, dis) => `<label>A, ancho de la cara (cm), igual para todos los niveles<input data-a-todos inputmode="decimal" value="${esc(niveles.find((n) => n.A !== "" && n.A != null)?.A ?? "")}" ${dis}></label>`;
 const COLS_NIVELES = [["nombre", "Nombre", "lista"], ["altura", "Altura (m)"]];
@@ -5964,7 +5979,7 @@ function tablaFilas(clave, filas, cols, dis, max) {
   return `<table class="med-geo" data-tabla="${clave}"><thead><tr>${cols.map(([, t]) => `<th>${t}</th>`).join("")}<th></th></tr></thead><tbody>
     ${filas.map((f, i) => `<tr>${cols.map(([k, t, tipo]) => `<td><input ${tipo === "lista" ? 'list="lista-niveles" autocomplete="off"' : tipo === "text" ? "" : 'inputmode="decimal"'} data-fila="${clave}:${i}:${k}" value="${esc(f[k] ?? "")}" ${dis} aria-label="${t} ${i + 1}"></td>`).join("")}
       <td>${dis ? "" : `<button type="button" class="quitar" data-quitar="${clave}:${i}" aria-label="Quitar la fila ${i + 1}" ${filas.length <= 1 ? "disabled" : ""}>✕</button>`}</td></tr>`).join("")}
-  </tbody></table>${cols.some((c) => c[2] === "lista") ? `<datalist id="lista-niveles">${NOMBRES_NIVEL.map((x) => `<option value="${x}">`).join("")}</datalist>` : ""}${dis ? "" : `<button type="button" class="boton boton-chico" data-agregar="${clave}" ${filas.length >= tope ? "disabled" : ""}>+ Agregar fila</button>${filas.length >= tope ? ` <span class="nota">(la planilla no tiene más lugar)</span>` : ""}`}`;
+  </tbody></table>${cols.some((c) => c[2] === "lista") ? `<datalist id="lista-niveles">${nombresNivel(filas).map((x) => `<option value="${esc(x)}">`).join("")}</datalist>` : ""}${dis ? "" : `<button type="button" class="boton boton-chico" data-agregar="${clave}" ${filas.length >= tope ? "disabled" : ""}>+ Agregar fila</button>${filas.length >= tope ? ` <span class="nota">(la planilla no tiene más lugar)</span>` : ""}`}`;
 }
 // agregar o quitar filas en la medición (tramos, niveles o riendas) manteniendo las lecturas a la par
 function cambiarFilas(m, clave, accion, i) {
@@ -6074,9 +6089,11 @@ function enlazarMedicion(p, m) {
   p.querySelectorAll("[data-q]").forEach((b) => (b.onclick = (ev) => {
     ev.stopPropagation();
     const [i, k, v] = b.dataset.q.split(":");
-    d.niveles[Number(i)].D[Number(k)] = v;
+    // tocar de nuevo el valor marcado lo borra (el nivel queda sin medir)
+    const quitar = b.getAttribute("aria-pressed") === "true";
+    d.niveles[Number(i)].D[Number(k)] = quitar ? "" : v;
     m.cambiado = true; guardarBorrador();
-    MD.tramo = Math.min(Number(i) + 1, d.niveles.length - 1);
+    MD.tramo = quitar ? Number(i) : Math.min(Number(i) + 1, d.niveles.length - 1);
     const y = document.querySelector("#med-cuerpo").scrollTop;
     pintarMedicion();
     const c = document.querySelector("#med-cuerpo"); c.scrollTop = y;
@@ -6085,6 +6102,7 @@ function enlazarMedicion(p, m) {
   p.querySelectorAll("[data-dato]").forEach((inp) => (inp.oninput = () => { d[inp.dataset.dato] = inp.value; cambio(); }));
   p.querySelector("[data-fecha]")?.addEventListener("input", (e) => { m.fecha = e.target.value; cambio(); });
   p.querySelector("[data-a-todos]")?.addEventListener("input", (e) => { d.niveles.forEach((n) => (n.A = e.target.value)); cambio(); });
+  p.querySelectorAll('[data-fila$=":nombre"][list]').forEach((i) => i.addEventListener("change", () => sumarNombreNivel(i)));
   p.querySelectorAll("[data-fila]").forEach((inp) => (inp.oninput = () => {
     const [clave, i, k] = inp.dataset.fila.split(":");
     if (clave === "riendas") d.anclajes.forEach((a) => (a.riendas[Number(i)][k] = inp.value));
@@ -6242,6 +6260,7 @@ function editarPerfil(pf, volver) {
   $("#pf-nombre")?.addEventListener("input", (e) => (pf.nombre = e.target.value));
   p.querySelector("[data-a-todos]")?.addEventListener("input", (e) => d.niveles.forEach((n) => (n.A = e.target.value)));
   p.querySelectorAll("[data-fila]").forEach((i) => (i.oninput = () => { const [c, n, k] = i.dataset.fila.split(":"); d[c][Number(n)][k] = i.value; }));
+  p.querySelectorAll('[data-fila$=":nombre"][list]').forEach((i) => i.addEventListener("change", () => sumarNombreNivel(i)));
   p.querySelectorAll("[data-agregar]").forEach((b) => (b.onclick = () => {
     const c = b.dataset.agregar, ult = d[c].at(-1) || {};
     d[c].push(c === "tramos" ? { nombre: String(d[c].length + 1), ancho: "", altura: "" } : c === "niveles" ? { nombre: ult.nombre || "", altura: "", A: d.niveles.find((n) => n.A !== "" && n.A != null)?.A ?? "" } : { nombre: String(d[c].length + 1), tipo: ult.tipo || "", nominal: ult.nominal ?? "" });
