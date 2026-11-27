@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-27-2";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-27-3";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5610,14 +5610,15 @@ const factorMastil = (d) => numeroCampo(d.medio_parante) || null;
 const SEPARACION_MIN_M = 3;
 function calcularMastil(d) {
   const fac = factorMastil(d);
-  const filas = d.niveles.map((n) => {
+  const filas = d.niveles.map((n, i) => {
     const [D1, D2, D3] = n.D.map((v) => (numeroCampo(v) == null || fac == null ? null : numeroCampo(v) * fac)), A = numeroCampo(n.A), h = numeroCampo(n.altura);
-    if ([D1, D2, D3].some((v) => v == null || isNaN(v))) return { h, A, falta: true };
+    if ([D1, D2, D3].some((v) => v == null || isNaN(v))) return { i, h, A, falta: true };
     const dm = (D1 + D2 + D3) / 3, e = A ? (dm * Math.sqrt(3)) / A : null;
     const a = e != null && Math.abs(e) <= 1 ? (Math.asin(e) * 180) / Math.PI : null;
     const x = (D2 - D3) / Math.sqrt(3), y = (2 * D1 - D2 - D3) / 3;
-    return { h, A, d: dm, e, a, x, y, r: Math.hypot(x, y) };
+    return { i, h, A, d: dm, e, a, x, y, r: Math.hypot(x, y) };
   });
+  const giroMal = new Set(), despMal = new Set();   // niveles que forman algún par fuera de tolerancia
   const ok = filas.filter((f) => !f.falta);
   const problemas = [];
   const aMax = ok.reduce((m, f) => (f.a != null && (m == null || Math.abs(f.a) > Math.abs(m.a)) ? f : m), null);
@@ -5632,8 +5633,10 @@ function calcularMastil(d) {
     if (a.a != null && b.a != null) {
       const lim = (0.5 * dh) / 3, v = Math.abs(b.a - a.a);
       if (!giro || v / lim > giro.v / giro.lim) giro = { v, lim, de: a.h, a: b.h };
+      if (v > lim) giroMal.add(a.i).add(b.i);
     }
     const ratio = Math.hypot(b.x - a.x, b.y - a.y) / (dh * 100);
+    if (ratio > 0.0025) despMal.add(a.i).add(b.i);
     if (!desp || ratio > desp.v) desp = { v: ratio, de: a.h, a: b.h };
   }
   if (giro && giro.v > giro.lim) problemas.push(`giro de ${numero(giro.v, 2)}° entre ${numero(giro.de, 1)} y ${numero(giro.a, 1)} m (máx. ${numero(giro.lim, 2)}°)`);
@@ -5642,7 +5645,7 @@ function calcularMastil(d) {
   const adm = numeroCampo(d.desplome_admisible);
   if (adm != null && rMax != null && rMax > adm) problemas.push(`desplome de ${numero(rMax, 1)} cm (admisible ${numero(adm, 1)} cm)`);
   const completo = ok.length === filas.length && filas.length > 0;
-  return { filas, aMax, giro, desp, rMax, adm, problemas, completo, cumple: ok.length >= 2 ? !problemas.length : null };
+  return { filas, aMax, giro, desp, rMax, adm, problemas, completo, giroMal, despMal, cumple: ok.length >= 2 ? !problemas.length : null };
 }
 // Tensiones, igual que su planilla: promedio de L1, L2 y L3 y error = (promedio / lectura − 1) × 100,
 // que tiene que quedar dentro de ± la tolerancia (30 %).
@@ -6051,14 +6054,18 @@ function resultadoMastilHtml(r) {
     : `<div class="med-veredicto ${r.cumple ? "si" : "no"}">${r.cumple ? "CUMPLE" : "NO CUMPLE"}<small>${r.cumple ? "Giro y desplome dentro de las tolerancias de la planilla" : esc(r.problemas.join(" · "))}</small></div>`;
   return `${grande}
     <table class="med-res"><thead><tr><th>Altura</th><th>d</th><th>α</th><th>x</th><th>y</th><th>r</th></tr></thead><tbody>
-      ${r.filas.map((f) => `<tr><td>${numero(f.h, 1)} m</td>${f.falta ? `<td colspan="5" class="nota">sin lecturas</td>` : `<td>${numero(f.d, 1)}</td>
-        <td>${f.a != null ? numero(f.a, 2) + "°" : "—"}</td><td>${numero(f.x, 1)}</td><td>${numero(f.y, 1)}</td><td><b>${numero(f.r, 1)}</b></td>`}</tr>`).join("")}
+      ${r.filas.map((f) => {
+        const mal = (c) => (c ? ' class="mal"' : "");
+        const aMal = f.a == null || Math.abs(f.a) > 5 || r.giroMal?.has(f.i), xyMal = r.despMal?.has(f.i), rMal = r.adm != null && f.r > r.adm;
+        return `<tr class="${!f.falta && (aMal || xyMal || rMal) ? "fuera" : ""}"><td>${numero(f.h, 1)} m</td>${f.falta ? `<td colspan="5" class="nota">sin lecturas</td>` : `<td>${numero(f.d, 1)}</td>
+        <td${mal(aMal)}>${f.a != null ? numero(f.a, 2) + "°" : "—"}</td><td${mal(xyMal)}>${numero(f.x, 1)}</td><td${mal(xyMal)}>${numero(f.y, 1)}</td><td${mal(rMal)}><b>${numero(f.r, 1)}</b></td>`}</tr>`;
+      }).join("")}
     </tbody></table>
     <ul class="med-checks">
-      <li>Giro total máx.: <b>${r.aMax?.a != null ? numero(r.aMax.a, 2) + "°" : "—"}</b> (tolerancia 5°)</li>
-      <li>Giro entre niveles: <b>${r.giro ? `${numero(r.giro.v, 2)}° entre ${numero(r.giro.de, 1)} y ${numero(r.giro.a, 1)} m` : "—"}</b> (0,5° cada 3 m${r.giro ? `: máx. ${numero(r.giro.lim, 2)}°` : ""}; niveles a 3 m o más)</li>
-      <li>Desplome entre niveles: <b>${r.desp ? `${numero(r.desp.v * 100, 2)} % entre ${numero(r.desp.de, 1)} y ${numero(r.desp.a, 1)} m` : "—"}</b> (tolerancia 0,25 %; niveles a 3 m o más)</li>
-      ${r.adm != null ? `<li>Desplome máx.: <b>${fmtCm(r.rMax)}</b> (admisible ${fmtCm(r.adm)})</li>` : ""}
+      <li class="${r.aMax?.a != null && Math.abs(r.aMax.a) > 5 ? "mal" : ""}">Giro total máx.: <b>${r.aMax?.a != null ? numero(r.aMax.a, 2) + "°" : "—"}</b> (tolerancia 5°)</li>
+      <li class="${r.giro && r.giro.v > r.giro.lim ? "mal" : ""}">Giro entre niveles: <b>${r.giro ? `${numero(r.giro.v, 2)}° entre ${numero(r.giro.de, 1)} y ${numero(r.giro.a, 1)} m` : "—"}</b> (0,5° cada 3 m${r.giro ? `: máx. ${numero(r.giro.lim, 2)}°` : ""}; niveles a 3 m o más)</li>
+      <li class="${r.desp && r.desp.v > 0.0025 ? "mal" : ""}">Desplome entre niveles: <b>${r.desp ? `${numero(r.desp.v * 100, 2)} % entre ${numero(r.desp.de, 1)} y ${numero(r.desp.a, 1)} m` : "—"}</b> (tolerancia 0,25 %; niveles a 3 m o más)</li>
+      ${r.adm != null ? `<li class="${r.rMax != null && r.rMax > r.adm ? "mal" : ""}">Desplome máx.: <b>${fmtCm(r.rMax)}</b> (admisible ${fmtCm(r.adm)})</li>` : ""}
     </ul>
     <p class="nota">Cálculo igual que la planilla: d = (D1+D2+D3)/3, e = d·√3/A, α = arcsen(e), x = (D2−D3)/√3, y = (2·D1−D2−D3)/3, r = √(x²+y²).</p>`;
 }
@@ -6083,7 +6090,7 @@ function resultadoTensionHtml(r) {
   return `${grande}${r.anclajes.map((a) => `<h3 class="med-sub">Anclaje ${esc(a.nombre)}</h3>
     <table class="med-res"><thead><tr><th>Rienda</th><th>Tipo</th><th>Ref.</th><th>Prom.</th><th>Error</th></tr></thead><tbody>
       ${a.riendas.map((f) => `<tr class="${f.prom != null && !f.bien ? "fuera" : ""}"><td>${esc(f.nombre)}</td><td>${esc(f.tipo || "")}</td><td>${numero(numeroCampo(f.nominal), 0)}</td>
-        <td>${f.prom != null ? numero(f.prom, 0) : "—"}</td><td><b>${f.err != null ? `${f.err > 0 ? "+" : ""}${numero(f.err, 1)} %` : "—"}</b></td></tr>`).join("")}
+        <td>${f.prom != null ? numero(f.prom, 0) : "—"}</td><td${f.prom != null && !f.bien ? ' class="mal"' : ""}><b>${f.err != null ? `${f.err > 0 ? "+" : ""}${numero(f.err, 1)} %` : "—"}</b></td></tr>`).join("")}
     </tbody></table>`).join("")}
     <p class="nota">Cálculo igual que la planilla: error = (promedio / lectura − 1) × 100, dentro de ±${numero(r.tol, 0)} %.</p>`;
 }
@@ -6172,7 +6179,7 @@ function resultadoHtml(r) {
   return `${grande}
     <table class="med-res"><thead><tr><th>Tramo</th><th>Altura</th><th>x</th><th>y</th><th>r</th></tr></thead><tbody>
       ${r.filas.map((f) => `<tr class="${f.r != null && r.tol != null && f.r > r.tol ? "fuera" : ""}"><td>${esc(f.nombre)}</td><td>${f.h != null ? numero(f.h / 100, 2) + " m" : "—"}</td>
-        <td>${fmtCm(f.x)}</td><td>${fmtCm(f.y)}</td><td><b>${fmtCm(f.r)}</b></td></tr>`).join("")}
+        <td>${fmtCm(f.x)}</td><td>${fmtCm(f.y)}</td><td${f.r != null && r.tol != null && f.r > r.tol ? ' class="mal"' : ""}><b>${fmtCm(f.r)}</b></td></tr>`).join("")}
     </tbody></table>
     ${graficoHtml(r)}
     ${r.incl ? `<p class="nota">Mayor inclinación entre tramos seguidos: 1/${numero(1 / r.incl.v, 0)} (entre ${esc(r.incl.de)} y ${esc(r.incl.a)}).</p>` : ""}

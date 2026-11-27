@@ -637,6 +637,8 @@ body.con-medicion { overflow: hidden; }
 .med-res th, .med-res td { padding: 7px 6px; border-bottom: 1px solid var(--linea-suave); text-align: right; }
 .med-res th:first-child, .med-res td:first-child { text-align: left; }
 .med-res tr.fuera td { color: #FFB4A9; }
+.med-res td.mal { color: #FF5A4F; font-weight: 700; background: rgba(255, 90, 79, .12); }
+.med-checks li.mal, .med-checks li.mal b { color: #FF5A4F; }
 .med-grafico { width: 100%; max-width: 420px; display: block; margin: 0 auto; }
 .med-grafico text { fill: var(--tinta-suave); font: 10px var(--texto); }
 .med-grafico .tol { stroke: #C0392B; stroke-dasharray: 5 4; }
