@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-25";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-26";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5513,7 +5513,7 @@ function filasDePerfil(tipo, perfil, o) {
     const tramos = d.tramos?.length ? structuredClone(d.tramos)
       : ["1", "2", "3", "4", "Tope"].map((nombre, i) => ({ nombre, ancho: null, altura: i === 0 ? 0 : i === 4 && h ? h * 100 : null }));
     return { altura: d.altura_m ? d.altura_m * 100 : h ? h * 100 : "", tramos,
-      lado1: tramos.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })), lado2: tramos.map(() => ({ iz: ["", "", ""], de: ["", "", ""] })) };
+      lado1: tramos.map((t, i) => ({ iz: i ? ["", "", ""] : CERO_GMS(), de: ["", "", ""] })), lado2: tramos.map((t, i) => ({ iz: i ? ["", "", ""] : CERO_GMS(), de: ["", "", ""] })) };
   }
   if (tipo === "verticalidad_mastil") return {
     medio_parante: d.medio_parante ?? "", desplome_admisible: d.desplome_admisible ?? "", unidad: "parante",
@@ -5537,8 +5537,8 @@ function nuevaMedicion(o, tipo, perfil, anterior) {
   if (anterior) {
     const a = structuredClone(anterior.datos);
     for (const k of ["instrumento", "empresa", "representante", "firma", "responsable", "vencimiento", "observaciones"]) delete a[k];
-    a.lado1?.forEach((l) => (l.iz = ["", "", ""], l.de = ["", "", ""]));
-    a.lado2?.forEach((l) => (l.iz = ["", "", ""], l.de = ["", "", ""]));
+    a.lado1?.forEach((l, i) => (l.iz = i ? ["", "", ""] : CERO_GMS(), l.de = ["", "", ""]));
+    a.lado2?.forEach((l, i) => (l.iz = i ? ["", "", ""] : CERO_GMS(), l.de = ["", "", ""]));
     a.niveles?.forEach((n) => (n.D = ["", "", ""]));
     a.anclajes?.forEach((an) => an.riendas.forEach((r) => (r.L = ["", "", ""])));
     datos = { ...datos, ...a, instrumento: anterior.datos.instrumento || "", empresa: anterior.datos.empresa || "",
@@ -5915,6 +5915,11 @@ function gmsHtml(lado, i, cual, v, puede) {
     `<label><input inputmode="${k === 2 ? "decimal" : "numeric"}" autocomplete="off" data-gms="${lado}:${i}:${cual}:${k}" value="${esc(x)}" ${puede ? "" : "disabled"}
       maxlength="${k === 0 ? 3 : k === 1 ? 2 : 5}" aria-label="${["grados", "minutos", "segundos"][k]}" data-max="${max[k]}"><span>${nombres[k]}</span></label>`).join("")}</div>`;
 }
+// Orden de lectura en campo, alternado: tramo 1 izquierda→derecha, tramo 2 derecha→izquierda, tramo 3 izquierda→derecha…
+// (el teodolito sigue desde donde quedó). Vale para cualquier monopolo.
+const ordenLecturas = (i) => (i % 2 ? ["de", "iz"] : ["iz", "de"]);
+// el tramo 1 izquierda siempre arranca en 0° 0′ 0″
+const CERO_GMS = () => ["0", "0", "0"];
 function ladoHtml(lado, d, r, puede) {
   const t = MD.tramo, desp = lado === "lado1" ? "x" : "y";
   return `${esquemaHtml(lado, d, t)}
@@ -5923,8 +5928,7 @@ function ladoHtml(lado, d, r, puede) {
       const l = d[lado][i], v = r.filas[i][desp];
       return `<section class="med-tramo${i === t ? " actual" : ""}" data-tramo="${i}">
         <h3>Tramo ${esc(tr.nombre)} <small>${tr.altura != null && tr.altura !== "" ? `a ${numero(numeroCampo(tr.altura) / 100, 2)} m` : "falta la altura"} · ancho ${tr.ancho != null && tr.ancho !== "" ? numero(numeroCampo(tr.ancho), 1) + " cm" : "—"}</small></h3>
-        <div class="med-lect"><span>Izquierda</span>${gmsHtml(lado, i, "iz", l.iz, puede)}</div>
-        <div class="med-lect"><span>Derecha</span>${gmsHtml(lado, i, "de", l.de, puede)}</div>
+        ${ordenLecturas(i).map((c) => `<div class="med-lect"><span>${c === "iz" ? "Izquierda" : "Derecha"}</span>${gmsHtml(lado, i, c, l[c], puede)}</div>`).join("")}
         <p class="med-desp" data-desp="${i}">${i === 0 ? "Tramo de referencia (desplazamiento 0)" : v == null ? "Desplazamiento: —" : `Desplazamiento ${desp}: <b>${numero(v, 1)} cm</b>`}</p>
       </section>`;
     }).join("")}</div>`;
