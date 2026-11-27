@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-29";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-27-1";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5671,7 +5671,12 @@ function resumenMedicion(m, r) {
 function textoResumen(m, r) {
   if (r.cumple == null && !r.max_cm && r.max == null) return "faltan lecturas";
   if (m.tipo === "verticalidad_monopolo") { const mx = r.max ?? r.max_cm, t = r.tol ?? r.tolerancia_cm; return mx != null ? `máx. ${numero(mx, 1)} cm de ${numero(t, 1)} cm` : "faltan lecturas"; }
-  if (m.tipo === "verticalidad_mastil") { const rr = r.rMax ?? r.desplome_max_cm; return rr != null ? `desplome máx. ${numero(rr, 1)} cm` : "faltan lecturas"; }
+  if (m.tipo === "verticalidad_mastil") {
+    const rr = r.rMax ?? r.desplome_max_cm;
+    // si no cumple, se dice por qué (el desplome máximo puede estar bien y fallar otra tolerancia)
+    const porque = r.cumple === false && r.problemas?.length ? r.problemas[0] : null;
+    return porque || (rr != null ? `desplome máx. ${numero(rr, 1)} cm` : "faltan lecturas");
+  }
   const f = Array.isArray(r.fuera) ? r.fuera.length : r.fuera;
   return f ? `${f} rienda${f === 1 ? "" : "s"} fuera de tolerancia` : "todas dentro de tolerancia";
 }
