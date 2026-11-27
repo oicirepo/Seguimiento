@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-19";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-20";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5671,7 +5671,23 @@ function herramientasHtml(tipo, o) {
     : b("verticalidad_mastil", "Verticalidad") + b("tension_riendas", "Tensión de riendas")}</div>`;
 }
 function enlazarHerramientas(ficha, tipo, o) {
-  ficha.querySelectorAll("[data-medir]").forEach((b) => (b.onclick = () => abrirMediciones(o, b.dataset.medir)));
+  const botones = [...ficha.querySelectorAll("[data-medir]")];
+  botones.forEach((b) => (b.onclick = () => abrirMediciones(o, b.dataset.medir)));
+  if (!botones.length) return;
+  // sin mediciones cargadas el botón queda apagado (como «Planos» sin carpeta); sigue andando para cargar la primera
+  const pintar = (tipos) => botones.forEach((b) => b.classList.toggle("apagado", !tipos.has(b.dataset.medir)));
+  const locales = () => [...Object.values(leerBorradores()).filter((m) => m.estructura_id === o.id),
+    ...misPend().filter((x) => x.op === "guardarMedicion" && x.args[0].estructura_id === o.id).map((x) => x.args[0])];
+  MD.hechas ||= {};
+  const revisar = () => {
+    pintar(new Set([...(MD.hechas[o.id] || []), ...locales().map((m) => m.tipo)]));
+    S.api.mediciones(o.id).then((ms) => {
+      MD.hechas[o.id] = [...new Set(ms.map((m) => m.tipo))];
+      if (botones[0].isConnected) pintar(new Set([...MD.hechas[o.id], ...locales().map((m) => m.tipo)]));
+    }).catch(() => {});
+  };
+  revisar();
+  MD.revisarHerramientas = () => botones[0].isConnected && revisar();   // al cerrar las mediciones (pudo cargar o borrar)
 }
 
 // ---- pantalla completa
@@ -5691,6 +5707,7 @@ function cerrarMedicion() {
   MD.m = null;
   $("#medicion").hidden = true;
   document.body.classList.remove("con-medicion");
+  MD.revisarHerramientas?.();
 }
 const barraMed = (titulo, volver, extra = "") => `<header class="med-barra"><button class="boton boton-chico" type="button" data-volver>‹ ${volver}</button>
   <h2>${titulo}</h2>${extra}</header>`;
