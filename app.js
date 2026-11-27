@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-20";
+import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-21";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -2525,10 +2525,28 @@ const barraCerrar = (texto) => `<div class="cabeza-acciones">
 function enlazarCerrar(cont, fn) {
   cont.querySelectorAll(".volver, .cerrar").forEach((b) => (b.onclick = fn));
 }
+// Computadora: la ficha ocupa la columna del panel y el mapa (con sus botones) se corre a la derecha.
+// Un botón de panel (Capas, Filtros…) abre su panel encima de la ficha; volver a la estructura lo cierra.
+function fichaAlCostado(abrir) {
+  if (movil.matches) return;
+  const app = $("#vista-app");
+  if (abrir) {
+    if (!app.classList.contains("con-ficha")) UI.antesFicha = { plegado: UI.plegado, modo: UI.modo };
+    app.classList.add("con-ficha");
+    UI.plegado = true;
+  } else {
+    app.classList.remove("con-ficha");
+    if (UI.antesFicha) UI.plegado = UI.antesFicha.plegado, UI.modo = UI.antesFicha.modo;
+    UI.antesFicha = null;
+  }
+  guardarUI(); aplicarUI();
+  if (!UI.plegado) pintarPanel();
+}
 async function abrirFicha(tipo, id) {
   S.abierta = { tipo, id };
   const ficha = $("#ficha");
   ficha.hidden = false;
+  fichaAlCostado(true);
   const g = fichaGuardada(tipo, id);
   const base = S.datos[tipo].find((x) => x.id === id);
   if (id < 0) {
@@ -2577,6 +2595,7 @@ async function abrirFicha(tipo, id) {
 function cerrarFicha() {
   S.abierta = null;
   $("#ficha").hidden = true;
+  fichaAlCostado(false);
   pintar();
 }
 

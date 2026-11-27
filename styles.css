@@ -674,3 +674,9 @@ body.con-medicion { overflow: hidden; }
 .med-uno { max-width: 220px; }
 .med-seguir { width: 100%; margin-top: 14px; }
 @media (max-width: 380px) { .cuartos button { font-size: 14px; padding: 11px 0; } }
+
+/* Computadora con una ficha abierta: la ficha usa la columna del panel; un panel abierto la tapa */
+@media (min-width: 761px) {
+  .app.con-ficha.plegado { grid-template-columns: var(--panel) 1fr; }
+  .app.con-ficha:not(.plegado) #ficha { visibility: hidden; }
+}
