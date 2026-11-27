@@ -699,3 +699,10 @@ body.con-medicion { overflow: hidden; }
 }
 .tilde { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.4; cursor: pointer; }
 .tilde input { margin-top: 3px; width: auto; flex: none; }
+
+/* teclado abierto en la carga de verticalidad: dibujo más chico y sin la ayuda, para que se vea lo que se escribe */
+.medicion.con-teclado .med-esquema.fijo .med-planta { width: 64px; height: 64px; }
+.medicion.con-teclado .med-esquema.fijo .med-costado { height: 96px; }
+.medicion.con-teclado .med-esquema.fijo { padding: 10px 0 4px; }
+.medicion.con-teclado .med-ayuda, .medicion.con-teclado .med-unidad { display: none; }
+.medicion.con-teclado .med-pie { display: none; }

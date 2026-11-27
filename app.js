@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-28";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-29";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5714,7 +5714,27 @@ function enlazarHerramientas(ficha, tipo, o) {
 }
 
 // ---- pantalla completa
+const ALTO_PANTALLA = { v: 0 };
+addEventListener("orientationchange", () => (ALTO_PANTALLA.v = 0));
+// Con el teclado abierto, la pantalla de medición ocupa solo lo visible (así el dibujo de arriba no se va)
+function ajustarAlTeclado() {
+  const p = $("#medicion"), vv = window.visualViewport;
+  if (!p || p.hidden || !vv) return;
+  // alto de la pantalla sin teclado (con «resizes-content» innerHeight también se achica, por eso se recuerda)
+  const escribiendo = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "");
+  if (!escribiendo) ALTO_PANTALLA.v = Math.max(vv.height, innerHeight);
+  const teclado = escribiendo && vv.height < ALTO_PANTALLA.v * 0.8;
+  p.style.top = teclado ? `${vv.offsetTop}px` : "";
+  p.style.height = teclado ? `${vv.height}px` : "";
+  p.style.bottom = teclado ? "auto" : "";
+  p.classList.toggle("con-teclado", teclado);
+  const foco = document.activeElement;
+  if (foco?.closest?.("#medicion") && escribiendo) requestAnimationFrame(() => bajoElDibujo(foco));
+}
+window.visualViewport?.addEventListener("resize", ajustarAlTeclado);
+window.visualViewport?.addEventListener("scroll", ajustarAlTeclado);
 function pantallaMedicion() {
+  if (!/^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName || "")) ALTO_PANTALLA.v = Math.max(window.visualViewport?.height || 0, innerHeight);
   let p = $("#medicion");
   if (!p) {
     p = document.createElement("section");
@@ -5866,10 +5886,10 @@ function pieHtml(m, r) {
 // ---- monopolo: esquema y lecturas en ° ′ ″
 // Línea roja con la deformada de lo medido (exagerada): parte de la base y quiebra en cada nivel con lectura.
 // «minimo» es lo que llega al ancho máximo cuando las lecturas son chicas (así un cuarto no parece enorme).
-function lineaDeformada(ys, cx, base, vals, minimo) {
+function lineaDeformada(ys, cx, base, vals, minimo, fija) {
   const pts = vals.map((v, i) => (v == null || isNaN(v) ? null : [v, ys[i]])).filter(Boolean);
   if (!pts.length) return "";
-  const esc_ = 15 / Math.max(minimo, ...pts.map(([v]) => Math.abs(v)));
+  const esc_ = fija || 15 / Math.max(minimo, ...pts.map(([v]) => Math.abs(v)));
   const lista = [[cx, base], ...pts.sort((a, b) => b[1] - a[1]).map(([v, y]) => [cx + v * esc_, y])];
   return `<polyline class="deforma" points="${lista.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}"/>
     ${pts.map(([v, y]) => `<circle class="deforma-punto" cx="${(cx + v * esc_).toFixed(1)}" cy="${y.toFixed(1)}" r="1.6"/>`).join("")}`;
@@ -5882,7 +5902,7 @@ function esquemaCostado(niveles, actual, nombre, mastil = false, deforma = null,
   const oculto = (i, y) => (i !== actual && ((i < n - 1 && i + 1 !== actual && Math.abs(ys[i + 1] - y) < 11) || (actual != null && Math.abs(ys[actual] - y) < 11)) ? 'opacity="0"' : "");
   if (mastil) {
     // mástil recto (como el alzado del plano), con las riendas y los antirrotores hacia el anclaje
-    const cx = 62, w = 4, ax = 116, ay = base + 4;
+    const cx = 62, w = 6, ax = 116, ay = base + 4;   // la línea roja: ±1 llega justo a las paredes (escala fija = w)
     const tipo = (i) => (/antirr/i.test(niveles[i].nombre || "") ? "anti" : /rienda|cintur/i.test(niveles[i].nombre || "") ? "rienda" : "");
     const zig = [];
     for (let y = base, k = 0; y > arriba + 3; y -= 6, k++) zig.push(`${cx + (k % 2 ? w : -w)},${y}`);
@@ -5894,9 +5914,9 @@ function esquemaCostado(niveles, actual, nombre, mastil = false, deforma = null,
       const x0 = t === "anti" ? cx + w + 7 : cx + w;
       return `<g data-i="${i}" class="rienda${i === actual ? " actual" : ""}">${t === "anti" ? `<line x1="${cx - w - 7}" y1="${y}" x2="${cx + w + 7}" y2="${y}"/>` : ""}<line x1="${x0}" y1="${y}" x2="${ax}" y2="${ay}"/></g>`; }).join("")}
     <rect x="${ax - 3}" y="${ay - 3}" width="6" height="6" fill="none" stroke="#999"/>
-    ${deforma ? lineaDeformada(ys, cx, base, deforma, minimo) : ""}
+    ${deforma ? lineaDeformada(ys, cx, base, deforma, minimo, w) : ""}
     ${ys.map((y, i) => `<g data-i="${i}" class="${i === actual ? "actual" : ""}"><line x1="${cx - w - 4}" y1="${y}" x2="${cx + w + 4}" y2="${y}"/>
-      <text x="${cx - w - (deforma ? 19 : 6)}" y="${y + 3.5}" text-anchor="end" ${oculto(i, y)}>${esc(niveles[i].etq)}</text></g>`).join("")}
+      <text x="${cx - (deforma ? 2 * w + 6 : w + 6)}" y="${y + 3.5}" text-anchor="end" ${oculto(i, y)}>${esc(niveles[i].etq)}</text></g>`).join("")}
   </svg>`;
   }
   const ancho = (i) => 6 + 9 * (1 - i / Math.max(1, n - 1));
@@ -5963,8 +5983,10 @@ const CUARTOS = [[-2, "−2"], [-1.75, "−1¾"], [-1.5, "−1½"], [-1.25, "−
 function bajoElDibujo(el) {
   const c = el.closest(".med-cuerpo"), fijo = c?.querySelector(".med-esquema.fijo");
   if (!fijo) return;
-  const tope = fijo.getBoundingClientRect().bottom + 8, r = el.closest(".med-tramo")?.getBoundingClientRect() || el.getBoundingClientRect();
+  const tope = fijo.getBoundingClientRect().bottom + 8, fondo = c.getBoundingClientRect().bottom - 8;
+  const caja = el.closest(".med-lect") || el.closest(".med-tramo") || el, r = caja.getBoundingClientRect();
   if (r.top < tope) c.scrollTop -= tope - r.top;
+  else if (r.bottom > fondo) c.scrollTop += Math.min(r.bottom - fondo, r.top - tope);
 }
 // la fila muestra de −1 a +1; deslizando a los costados aparecen los valores mayores (muy torcido)
 function ubicarCuartos(p) {

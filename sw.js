@@ -3,7 +3,7 @@
 //   La página principal se pide a la red primero, pero si tarda más de 4 s se usa la guardada.
 // - Mapas de fondo: cada pedazo de mapa que se ve queda guardado (hasta unos 3000).
 // - Los datos de Neon no pasan por acá: los guarda la propia web en el dispositivo.
-const V = "2026-11-26-28";
+const V = "2026-11-26-29";
 const CACHE = "obras-oici-" + V;
 const MAPAS = "obras-oici-mapas-v1";
 const MAX_TESELAS = 3000;
