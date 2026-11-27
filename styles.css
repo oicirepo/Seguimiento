@@ -606,6 +606,8 @@ body.con-medicion { overflow: hidden; }
 .med-costado g.actual line { stroke: var(--acento); stroke-width: 3; }
 .med-costado g.actual text { fill: var(--acento); font-size: 12px; }
 .med-costado g.rienda line { stroke: #5a5a5a; stroke-width: .8; }
+.med-costado .deforma { fill: none; stroke: #FF5A4F; stroke-width: 1.6; stroke-linejoin: round; }
+.med-costado .deforma-punto { fill: #FF5A4F; }
 .med-costado g.rienda.actual line { stroke: var(--acento); stroke-width: 2; }
 .med-ayuda { margin: 4px 0 12px; }
 .med-tramos { display: grid; gap: 10px; }

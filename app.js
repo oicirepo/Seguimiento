@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-27";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-28";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5864,7 +5864,17 @@ function pieHtml(m, r) {
 }
 
 // ---- monopolo: esquema y lecturas en ° ′ ″
-function esquemaCostado(niveles, actual, nombre, mastil = false) {
+// Línea roja con la deformada de lo medido (exagerada): parte de la base y quiebra en cada nivel con lectura.
+// «minimo» es lo que llega al ancho máximo cuando las lecturas son chicas (así un cuarto no parece enorme).
+function lineaDeformada(ys, cx, base, vals, minimo) {
+  const pts = vals.map((v, i) => (v == null || isNaN(v) ? null : [v, ys[i]])).filter(Boolean);
+  if (!pts.length) return "";
+  const esc_ = 15 / Math.max(minimo, ...pts.map(([v]) => Math.abs(v)));
+  const lista = [[cx, base], ...pts.sort((a, b) => b[1] - a[1]).map(([v, y]) => [cx + v * esc_, y])];
+  return `<polyline class="deforma" points="${lista.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}"/>
+    ${pts.map(([v, y]) => `<circle class="deforma-punto" cx="${(cx + v * esc_).toFixed(1)}" cy="${y.toFixed(1)}" r="1.6"/>`).join("")}`;
+}
+function esquemaCostado(niveles, actual, nombre, mastil = false, deforma = null, minimo = 1) {
   const n = niveles.length, alto = 200, base = 186, arriba = 18;
   const H = Math.max(...niveles.map((x) => x.h ?? 0), 1);
   const ys = niveles.map((x, i) => (x.h != null ? base - ((base - arriba) * x.h) / H : base - ((base - arriba) * i) / Math.max(1, n - 1)));
@@ -5872,7 +5882,7 @@ function esquemaCostado(niveles, actual, nombre, mastil = false) {
   const oculto = (i, y) => (i !== actual && ((i < n - 1 && i + 1 !== actual && Math.abs(ys[i + 1] - y) < 11) || (actual != null && Math.abs(ys[actual] - y) < 11)) ? 'opacity="0"' : "");
   if (mastil) {
     // mástil recto (como el alzado del plano), con las riendas y los antirrotores hacia el anclaje
-    const cx = 52, w = 4, ax = 114, ay = base + 4;
+    const cx = 62, w = 4, ax = 116, ay = base + 4;
     const tipo = (i) => (/antirr/i.test(niveles[i].nombre || "") ? "anti" : /rienda|cintur/i.test(niveles[i].nombre || "") ? "rienda" : "");
     const zig = [];
     for (let y = base, k = 0; y > arriba + 3; y -= 6, k++) zig.push(`${cx + (k % 2 ? w : -w)},${y}`);
@@ -5884,20 +5894,27 @@ function esquemaCostado(niveles, actual, nombre, mastil = false) {
       const x0 = t === "anti" ? cx + w + 7 : cx + w;
       return `<g data-i="${i}" class="rienda${i === actual ? " actual" : ""}">${t === "anti" ? `<line x1="${cx - w - 7}" y1="${y}" x2="${cx + w + 7}" y2="${y}"/>` : ""}<line x1="${x0}" y1="${y}" x2="${ax}" y2="${ay}"/></g>`; }).join("")}
     <rect x="${ax - 3}" y="${ay - 3}" width="6" height="6" fill="none" stroke="#999"/>
+    ${deforma ? lineaDeformada(ys, cx, base, deforma, minimo) : ""}
     ${ys.map((y, i) => `<g data-i="${i}" class="${i === actual ? "actual" : ""}"><line x1="${cx - w - 4}" y1="${y}" x2="${cx + w + 4}" y2="${y}"/>
-      <text x="${cx - w - 6}" y="${y + 3.5}" text-anchor="end" ${oculto(i, y)}>${esc(niveles[i].etq)}</text></g>`).join("")}
+      <text x="${cx - w - (deforma ? 19 : 6)}" y="${y + 3.5}" text-anchor="end" ${oculto(i, y)}>${esc(niveles[i].etq)}</text></g>`).join("")}
   </svg>`;
   }
   const ancho = (i) => 6 + 9 * (1 - i / Math.max(1, n - 1));
   return `<svg viewBox="0 0 120 ${alto}" class="med-costado" aria-label="La estructura de costado: ${esc(nombre)}">
     <line x1="10" y1="${base + 4}" x2="110" y2="${base + 4}" stroke="#666" stroke-width="2"/>
     <path d="M${60 - ancho(0)} ${base} L${60 - ancho(n - 1)} ${arriba} L${60 + ancho(n - 1)} ${arriba} L${60 + ancho(0)} ${base}Z" fill="#3a3a3a" stroke="#888" stroke-width="1"/>
+    ${deforma ? lineaDeformada(ys, 60, base, deforma, minimo) : ""}
     ${ys.map((y, i) => `<g data-i="${i}" class="${i === actual ? "actual" : ""}"><line x1="${60 - ancho(i) - 6}" y1="${y}" x2="${60 + ancho(i) + 6}" y2="${y}"/>
-      <text x="${60 + ancho(i) + 10}" y="${y + 4}" ${oculto(i, y)}>${esc(niveles[i].etq)}</text></g>`).join("")}
+      <text x="${deforma ? 80 : 60 + ancho(i) + 10}" y="${y + 4}" ${oculto(i, y)}>${esc(niveles[i].etq)}</text></g>`).join("")}
   </svg>`;
 }
+const costadoMonopolo = (lado, d, tramo) => {
+  const f = calcularVerticalidad(d).filas, c = lado === "lado1" ? "x" : "y";
+  return esquemaCostado(d.tramos.map((t) => ({ h: numeroCampo(t.altura), etq: t.nombre })), tramo, `tramo ${d.tramos[tramo]?.nombre}`, false,
+    f.map((x) => x[c]), 2);   // cm: hasta 2 cm se dibuja proporcional; más, al ancho máximo
+};
 function esquemaHtml(lado, d, tramo) {
-  const costado = esquemaCostado(d.tramos.map((t, i) => ({ h: numeroCampo(t.altura), etq: t.nombre })), tramo, `tramo ${d.tramos[tramo]?.nombre}`);
+  const costado = costadoMonopolo(lado, d, tramo);
   const ang = lado === "lado1" ? 90 : 0;
   const tx = 60 + 46 * Math.cos((ang * Math.PI) / 180), ty = 60 + 46 * Math.sin((ang * Math.PI) / 180);
   const otro = lado === "lado1" ? [106, 60] : [60, 106];
@@ -5980,7 +5997,8 @@ function plantaMastil(k) {
 }
 function nivelesHtml(k, d, r, puede) {
   const t = MD.tramo;
-  const costado = esquemaCostado(d.niveles.map((n) => ({ h: numeroCampo(n.altura), etq: `${numero(numeroCampo(n.altura), 1)} m`, nombre: n.nombre })), t, `nivel a ${d.niveles[t]?.altura} m`, true);
+  const costado = esquemaCostado(d.niveles.map((n) => ({ h: numeroCampo(n.altura), etq: `${numero(numeroCampo(n.altura), numeroCampo(n.altura) % 1 ? 1 : 0)} m`, nombre: n.nombre })), t, `nivel a ${d.niveles[t]?.altura} m`, true,
+    d.niveles.map((n) => numeroCampo(n.D[k])), 1);
   const hechos = d.niveles.filter((n) => numeroCampo(n.D[k]) != null).length;
   return `<div class="med-esquema fijo">${plantaMastil(k)}${costado}</div>
     ${numeroCampo(d.medio_parante) ? `<p class="nota med-unidad">Lecturas en medios parantes (1 = ${numero(numeroCampo(d.medio_parante), 1)} cm).</p>` : ""}
@@ -6135,6 +6153,8 @@ function refrescarCalculo() {
   const m = MD.m, r = calcularMedicion(m);
   $("#med-pie").innerHTML = pieHtml(m, r);
   const k = MD.pestana;
+  const cost = document.querySelector("#medicion .med-costado");
+  if (cost && m.tipo === "verticalidad_monopolo" && (k === "lado1" || k === "lado2")) cost.outerHTML = costadoMonopolo(k, m.datos, MD.tramo);
   document.querySelectorAll("[data-desp]").forEach((p) => {
     const i = Number(p.dataset.desp);
     if (m.tipo === "verticalidad_monopolo" && (k === "lado1" || k === "lado2")) {
