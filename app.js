@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-27-3";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-27-4";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -3314,6 +3314,53 @@ window.addEventListener("appinstalled", () => { $("#instalar").hidden = true; av
 // Celular: arrastrar la agarradera de arriba cambia el alto; tocarla o "▾" lo minimiza.
 const CLAVE_UI = "obras-oici-panel-v1";
 const movil = matchMedia("(max-width: 760px)");
+
+// ---- Google Maps y Waze: en el celular abren directo la aplicación; en la computadora, la página
+// Los enlaces siguen siendo los de la web (https), así funcionan igual en la computadora y como respaldo.
+const SO = (() => {
+  const ua = navigator.userAgent || "";
+  if (/Android/i.test(ua)) return "android";
+  if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "ios";
+  return "";
+})();
+function destinoNav(href) {
+  try {
+    const u = new URL(href);
+    if (/(^|\.)google\.[a-z.]+$/.test(u.hostname) && u.pathname.startsWith("/maps/dir")) {
+      const [lat, lon] = (u.searchParams.get("destination") || "").split(",").map(Number);
+      return isFinite(lat) && isFinite(lon) ? { app: "maps", lat, lon } : null;
+    }
+    if (/(^|\.)waze\.com$/.test(u.hostname) && u.pathname.startsWith("/ul")) {
+      const [lat, lon] = (u.searchParams.get("ll") || "").split(",").map(Number);
+      return isFinite(lat) && isFinite(lon) ? { app: "waze", lat, lon } : null;
+    }
+  } catch (e) { /* no es un enlace de navegación */ }
+  return null;
+}
+function abrirAppNav(dest, web) {
+  const ll = `${dest.lat},${dest.lon}`, respaldo = encodeURIComponent(web);
+  if (SO === "android") {
+    // intent: abre la app; si no está instalada, Chrome va solo a la página
+    location.href = dest.app === "maps"
+      ? `intent://navigation?q=${ll}&mode=d#Intent;scheme=google.navigation;package=com.google.android.apps.maps;S.browser_fallback_url=${respaldo};end`
+      : `intent://?ll=${ll}&navigate=yes#Intent;scheme=waze;package=com.waze;S.browser_fallback_url=${respaldo};end`;
+    return;
+  }
+  // iPhone: esquema de la app; si en un momento la página sigue a la vista, la app no está y se abre la web
+  const t = setTimeout(() => { if (document.visibilityState === "visible") location.href = web; }, 1600);
+  const cancelar = () => { if (document.visibilityState === "hidden") clearTimeout(t); };
+  document.addEventListener("visibilitychange", cancelar, { once: true });
+  addEventListener("pagehide", () => clearTimeout(t), { once: true });
+  location.href = dest.app === "maps" ? `comgooglemaps://?daddr=${ll}&directionsmode=driving` : `waze://?ll=${ll}&navigate=yes`;
+}
+document.addEventListener("click", (e) => {
+  if (!SO || e.defaultPrevented || e.button) return;
+  const a = e.target.closest?.("a[href]");
+  const dest = a && destinoNav(a.href);
+  if (!dest) return;
+  e.preventDefault();
+  abrirAppNav(dest, a.href);
+});
 const UI = { ancho: 380, alto: Math.round(innerHeight * 0.45), plegado: false, modo: "capas" };
 try { Object.assign(UI, JSON.parse(localStorage.getItem(CLAVE_UI) || "{}")); } catch (e) { /* valores de siempre */ }
 const guardarUI = () => { try { localStorage.setItem(CLAVE_UI, JSON.stringify(UI)); } catch (e) { /* sin almacenamiento */ } };
