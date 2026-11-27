@@ -671,12 +671,13 @@ body.con-medicion { overflow: hidden; }
 .med-nombre { text-align: center; font: 700 17px/1.2 var(--cond); color: var(--acento); }
 .med-nivel .med-valor { justify-self: end; margin-left: 0; }
 /* mástil: el dibujo queda fijo arriba mientras se cargan los niveles */
-.med-cuerpo .med-esquema:has(.med-dibujo) { position: sticky; top: -14px; z-index: 3; background: var(--fondo); padding: 14px 0 8px; margin: -14px 0 6px; border-bottom: 1px solid var(--linea-suave); align-items: center; }
+.med-cuerpo .med-esquema.fijo { position: sticky; top: -14px; z-index: 3; background: var(--fondo); padding: 14px 0 8px; margin: -14px 0 6px; border-bottom: 1px solid var(--linea-suave); align-items: center; }
 .med-esquema:has(.med-dibujo) .med-dibujo { width: auto; height: 118px; max-width: 58%; object-fit: contain; }
 .med-esquema:has(.med-dibujo) .med-costado { height: 150px; }
 .med-tramos > * , .med-nivel { min-width: 0; }
 .cuartos { min-width: 0; width: 100%; }
-.med-nivel { scroll-margin-top: 185px; }
+.med-tramo { scroll-margin-top: 185px; }
+.med-tramo input { scroll-margin-top: 230px; }
 .med-valor { margin-left: auto; font: 700 15px var(--cond); color: var(--acento); }
 .cuartos { display: flex; gap: 4px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
 .cuartos::-webkit-scrollbar { display: none; }

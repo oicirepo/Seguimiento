@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-24";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-25";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5907,7 +5907,7 @@ function esquemaHtml(lado, d, tramo) {
     <g transform="translate(${tx} ${ty})"><circle r="8" fill="var(--acento-fuerte)" stroke="var(--acento)"/><text y="4" text-anchor="middle" class="t">${lado === "lado1" ? "1" : "2"}</text></g>
     <g transform="translate(${otro[0]} ${otro[1]})" opacity=".45"><circle r="6" fill="none" stroke="#888" stroke-dasharray="2 2"/><text y="3.5" text-anchor="middle" class="t2">${lado === "lado1" ? "2" : "1"}</text></g>
   </svg>`;
-  return `<div class="med-esquema">${planta}${costado}</div>`;
+  return `<div class="med-esquema fijo">${planta}${costado}</div>`;
 }
 function gmsHtml(lado, i, cual, v, puede) {
   const nombres = ["°", "′", "″"], max = [359, 59, 59.9];
@@ -5938,6 +5938,13 @@ const campoNum = (attr, v, puede, etq, conSigno = true) => `<label class="med-nu
 // con todos los niveles. En medios parantes se elige con un toque, de −1 a +1 de a cuartos (+ = se corrió a la derecha).
 const CUARTOS = [[-2, "−2"], [-1.75, "−1¾"], [-1.5, "−1½"], [-1.25, "−1¼"], [-1, "−1"], [-0.75, "−¾"], [-0.5, "−½"], [-0.25, "−¼"], [0, "0"],
   [0.25, "+¼"], [0.5, "+½"], [0.75, "+¾"], [1, "+1"], [1.25, "+1¼"], [1.5, "+1½"], [1.75, "+1¾"], [2, "+2"]];
+// con el dibujo fijo arriba, la casilla que se está llenando no tiene que quedar tapada por él
+function bajoElDibujo(el) {
+  const c = el.closest(".med-cuerpo"), fijo = c?.querySelector(".med-esquema.fijo");
+  if (!fijo) return;
+  const tope = fijo.getBoundingClientRect().bottom + 8, r = el.closest(".med-tramo")?.getBoundingClientRect() || el.getBoundingClientRect();
+  if (r.top < tope) c.scrollTop -= tope - r.top;
+}
 // la fila muestra de −1 a +1; deslizando a los costados aparecen los valores mayores (muy torcido)
 function ubicarCuartos(p) {
   p.querySelectorAll(".cuartos").forEach((fila) => {
@@ -5951,7 +5958,7 @@ function nivelesHtml(k, d, r, puede) {
   const t = MD.tramo;
   const costado = esquemaCostado(d.niveles.map((n) => ({ h: numeroCampo(n.altura), etq: `${numero(numeroCampo(n.altura), 1)} m`, nombre: n.nombre })), t, `nivel a ${d.niveles[t]?.altura} m`, true);
   const hechos = d.niveles.filter((n) => numeroCampo(n.D[k]) != null).length;
-  return `<div class="med-esquema"><img src="plantillas/mastil-esquema.png" alt="Planta del mástil: lados 1, 2 y 3, D1, D2 y D3 positivos en el sentido de las flechas" class="med-dibujo">${costado}</div>
+  return `<div class="med-esquema fijo"><img src="plantillas/mastil-esquema.png" alt="Planta del mástil: lados 1, 2 y 3, D1, D2 y D3 positivos en el sentido de las flechas" class="med-dibujo">${costado}</div>
     ${numeroCampo(d.medio_parante) ? `<p class="nota med-unidad">Lecturas en medios parantes (1 = ${numero(numeroCampo(d.medio_parante), 1)} cm).</p>` : ""}
     ${!numeroCampo(d.medio_parante) ? `<p class="nota med-alerta">Falta la medida del medio parante (en Datos) para pasar las lecturas a cm y calcular.</p>` : ""}
     <p class="nota med-ayuda">Teodolito en el <b>anclaje ${k + 1}</b> (lado ${k + 1} del dibujo, da D${k + 1}): para cada nivel, mirá el medio del parante y marcá cuánto se corrió: <b>+ a la derecha</b>, − a la izquierda. Van ${hechos} de ${d.niveles.length}.</p>
@@ -6126,7 +6133,7 @@ function enlazarMedicion(p, m) {
   const entradas = [...p.querySelectorAll("[data-gms], [data-d], [data-l]")];
   entradas.forEach((inp, idx) => {
     const fila = Number((inp.dataset.gms || inp.dataset.d || inp.dataset.l).split(":")[inp.dataset.l ? 1 : inp.dataset.gms ? 1 : 0]);
-    inp.onfocus = () => { marcarTramo(fila); inp.select(); };
+    inp.onfocus = () => { marcarTramo(fila); inp.select(); bajoElDibujo(inp); };
     inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); entradas[idx + 1]?.focus(); } };
     inp.oninput = () => {
       if (inp.dataset.gms) {
