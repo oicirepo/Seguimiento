@@ -18,8 +18,7 @@ mapa por etapa, hitos para tildar, cuaderno de obra, vencimientos de recepción 
 Desde la web: **Usuarios** (botón arriba, solo para administradores).
 
 1. La persona entra a la web y usa **Crear cuenta**, con su correo **@antel.com.uy** (otros dominios no se aceptan; `sql/parte31_cuentas_antel.sql`).
-   Si está prendida el *alta automática*, entra sola como **Solo visualizar** (ve todas las obras, sin D.O.).
-2. Si no, aparece en *Usuarios > Esperando habilitación*. Elegí su permiso (Editor o Solo visualizar) y sus
+2. Aparece en *Usuarios > Esperando habilitación*: por defecto se aprueba como **Solo visualizar** (ve todas, sin D.O.). Si es director de obra, elegí «Con obras» y sus
    iniciales tal como figuran en el campo D.O. (para "Mis obras"), y tocá **Habilitar**.
 3. En *Con acceso* se cambia el permiso o las iniciales, o se quita el acceso.
 

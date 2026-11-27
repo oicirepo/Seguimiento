@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-22";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-23";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -740,9 +740,6 @@ async function entrarApp() {
       $("#error-ingreso").textContent = "No se pudo conectar con Neon desde esta red. Probá de nuevo; si estás en una red de empresa, puede estar bloqueando el acceso.";
       return;
     }
-  }
-  if (!S.perfil && S.usuario && CORREO_ANTEL.test(S.usuario.email || "")) {
-    try { if (await S.api.pedirAcceso()) S.perfil = await conTiempo(S.api.perfil(), 20000); } catch (e) { /* queda esperando habilitación */ }
   }
   if (!S.perfil) {
     $("#correo-pendiente").textContent = S.usuario?.email || "";
@@ -2945,20 +2942,16 @@ async function abrirAdmin() {
   const rolSel = (r) => `<select name="rol"><option value="EDITOR" ${r === "EDITOR" ? "selected" : ""}>Editor</option><option value="LECTOR" ${r === "LECTOR" ? "selected" : ""}>Solo visualizar</option></select>`;
   const reg = (c) => (c.registrado ? "se registró el " + fecha(String(c.registrado).slice(0, 10)) : "");
   caja.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Usuarios</h2>
-      <p class="nota">Quien se registra en la web con un correo @antel.com.uy aparece acá. Habilitalo para que vea las obras.</p></div>
-    <div class="ficha-bloque" id="bloque-alta" hidden>
-      <label class="tilde"><input type="checkbox" id="alta-automatica"><span>Las cuentas nuevas @antel.com.uy entran solas como <b>Solo visualizar</b> (ven todas las obras, sin D.O. y sin poder cambiar nada).</span></label>
-    </div>
+      <p class="nota">Quien se registra en la web con un correo @antel.com.uy aparece acá. Aprobala: por defecto entra como <b>Solo visualizar</b> (ve todas las obras, sin D.O.); si es director de obra, elegí «Con obras» y cuál.</p></div>
     <div class="ficha-bloque">
       <h2>Esperando habilitación <span class="cuenta">${pend.length || ""}</span></h2>
       ${pend.length ? pend.map((c) => `<form class="form cuenta-form" data-id="${esc(c.user_id)}">
           <p class="cuenta-mail"><b>${esc(c.email)}</b><br><small>${esc(c.nombre_cuenta || "")} ${reg(c)}</small></p>
           <label>Nombre<input name="nombre" value="${esc(c.nombre_cuenta || "")}" required></label>
-          <div class="dos"><label>Permiso${rolSel("EDITOR")}</label>
+          <div class="dos"><label>Permiso${rolSel("LECTOR")}</label>
           <label>Tipo de usuario${tipoSel(false)}</label></div>
           ${doSel("", false)}
-          <div class="acciones"><button class="boton boton-primario" type="submit">Habilitar</button>
-          <button class="boton" type="button" data-solo-ver>Habilitar solo para ver</button></div>
+          <button class="boton boton-primario" type="submit">Aprobar</button>
         </form>`).join("") : `<p class="nota">No hay cuentas nuevas. Cuando alguien use "Crear cuenta" en la web, va a aparecer acá.</p>`}
     </div>
     <div class="ficha-bloque">
@@ -2974,22 +2967,6 @@ async function abrirAdmin() {
         </form>`).join("")}
     </div>`;
   enlazarCerrar(caja, () => { caja.hidden = true; });
-  S.api.adminAltaAutomatica().then((v) => {
-    const b = $("#bloque-alta"), t = $("#alta-automatica");
-    if (!b) return;
-    b.hidden = false; t.checked = v;
-    t.onchange = async () => {
-      t.disabled = true;
-      try { t.checked = await S.api.adminAltaAutomatica(t.checked); aviso(t.checked ? "Alta automática prendida" : "Alta automática apagada"); }
-      catch (e) { t.checked = !t.checked; aviso(e.message, true); }
-      finally { t.disabled = false; }
-    };
-  }).catch(() => {});
-  caja.querySelectorAll("[data-solo-ver]").forEach((b) => (b.onclick = () => {
-    const f = b.closest("form");
-    f.rol.value = "LECTOR"; f.tipo.value = "todas"; f.tipo.onchange();
-    f.requestSubmit();
-  }));
   caja.querySelectorAll(".cuenta-form").forEach((f) => {
     const campoDO = f.querySelector(".campo-do");
     f.tipo.onchange = () => (campoDO.hidden = f.tipo.value !== "obras");
@@ -3002,7 +2979,7 @@ async function abrirAdmin() {
       f.querySelectorAll("button").forEach((b) => (b.disabled = true));
       try {
         const r = await S.api.adminHabilitar(f.dataset.id, f.nombre.value.trim(), f.rol.value, ini, con);
-        aviso(f.closest(".ficha-bloque").querySelector("h2").textContent.startsWith("Esperando") ? `${f.nombre.value} habilitado` : "Cambios guardados");
+        aviso(f.closest(".ficha-bloque").querySelector("h2").textContent.startsWith("Esperando") ? `${f.nombre.value} aprobado` : "Cambios guardados");
         if (r?.sinTipo) aviso("Se guardó el permiso, pero para el tipo de usuario falta correr sql/parte14_tipo_usuario.sql en Neon.", true);
         if (f.dataset.id === S.perfil.user_id) {
           S.perfil = await S.api.perfil();

@@ -2,8 +2,8 @@
 -- PARTE 32 — Pasar una cuenta a otro correo sin perder nada   (Neon > SQL Editor > Run)
 --
 -- Antes de correrlo:
---   1. En la web, «Crear cuenta» con el correo NUEVO (y su contraseña). Si queda esperando habilitación
---      o entra como Solo visualizar, no importa: este script le pasa todo lo de la cuenta vieja.
+--   1. En la web, «Crear cuenta» con el correo NUEVO (y su contraseña). Queda esperando habilitación;
+--      no hace falta aprobarla: este script le pasa todo lo de la cuenta vieja.
 --   2. Cambiá los dos correos de abajo (viejo y nuevo) y dale Run.
 --
 -- Qué hace: la cuenta nueva queda con el mismo acceso que la vieja (administrador, Editor, director de obra…)

@@ -19,7 +19,6 @@ async function pedirCarpeta(codigo, token) {
 
 // mismo criterio que la base (sql/parte31): solo cuentas @antel.com.uy
 export const CORREO_ANTEL = /^[^@\s]+@antel\.com\.uy$/i;
-let altaAutomatica = true;
 const CAMPO_ESTADO = { estructura: "ESTADO", obra: "Estado" };
 const CLAVE = { estructura: "estructura_id", obra: "obra_id" };
 
@@ -146,17 +145,6 @@ async function crearNeon() {
       await editarCapa(tipo, id, cambios, "Guardar datos");
     },
     async adminUsuarios() { return chequear(await neon.rpc("admin_usuarios"), "Usuarios"); },
-    // Cuentas @antel.com.uy: acceso automático «Solo visualizar» (sql/parte31_cuentas_antel.sql)
-    async pedirAcceso() {
-      const { data, error } = await neon.rpc("pedir_acceso");
-      return error ? false : !!data;
-    },
-    async adminAltaAutomatica(valor = null) {
-      const { data, error } = await neon.rpc("admin_alta_automatica", { p_valor: valor });
-      if (error) throw new Error(/admin_alta_automatica|schema cache|could not find/i.test(error.message)
-        ? "Falta preparar la base: corré sql/parte31_cuentas_antel.sql en Neon y tocá Refresh schema cache." : error.message);
-      return !!data;
-    },
     // Mediciones de campo: verticalidad, tensión de riendas (sql/parte25_mediciones.sql)
     async mediciones(estructuraId) {
       const { data, error } = await neon.rpc("mediciones_de", { p_estructura: estructuraId });
@@ -402,8 +390,6 @@ function crearDemo() {
     async perfil() { await espera(); return structuredClone(yo); },
     async elegirMiDO(ini) { await espera(); yo.iniciales_do = ini; Object.assign(cuentas.find((c) => c.user_id === "demo"), { iniciales_do: ini }); },
     async adminUsuarios() { await espera(); return structuredClone(cuentas.filter((c) => c.habilitado || CORREO_ANTEL.test(c.email))); },
-    async pedirAcceso() { await espera(); return true; },
-    async adminAltaAutomatica(valor = null) { await espera(); if (valor != null) altaAutomatica = valor; return altaAutomatica; },
     async mediciones(eid) { await espera(); return structuredClone(mediciones.filter((m) => m.estructura_id === eid)).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))); },
     async guardarMedicion(m) {
       await espera();
