@@ -17,7 +17,9 @@ async function pedirCarpeta(codigo, token) {
   return d;
 }
 
-const TABLA = { estructura: "Estructuras OICI Obra", obra: "Obras" };
+// mismo criterio que la base (sql/parte31): solo cuentas @antel.com.uy
+export const CORREO_ANTEL = /^[^@\s]+@antel\.com\.uy$/i;
+let altaAutomatica = true;
 const CAMPO_ESTADO = { estructura: "ESTADO", obra: "Estado" };
 const CLAVE = { estructura: "estructura_id", obra: "obra_id" };
 
@@ -144,6 +146,17 @@ async function crearNeon() {
       await editarCapa(tipo, id, cambios, "Guardar datos");
     },
     async adminUsuarios() { return chequear(await neon.rpc("admin_usuarios"), "Usuarios"); },
+    // Cuentas @antel.com.uy: acceso automático «Solo visualizar» (sql/parte31_cuentas_antel.sql)
+    async pedirAcceso() {
+      const { data, error } = await neon.rpc("pedir_acceso");
+      return error ? false : !!data;
+    },
+    async adminAltaAutomatica(valor = null) {
+      const { data, error } = await neon.rpc("admin_alta_automatica", { p_valor: valor });
+      if (error) throw new Error(/admin_alta_automatica|schema cache|could not find/i.test(error.message)
+        ? "Falta preparar la base: corré sql/parte31_cuentas_antel.sql en Neon y tocá Refresh schema cache." : error.message);
+      return !!data;
+    },
     // Mediciones de campo: verticalidad, tensión de riendas (sql/parte25_mediciones.sql)
     async mediciones(estructuraId) {
       const { data, error } = await neon.rpc("mediciones_de", { p_estructura: estructuraId });
@@ -363,9 +376,10 @@ function crearDemo() {
     if (o.etapa >= 6) { o.recepcion = "RD"; o.dias_para_recepcion = null; }
   };
   const cuentas = [
-    { user_id: "u-juan", email: "juan.perez@ejemplo.com", nombre_cuenta: "Juan Pérez", registrado: dia(-1), nombre: null, rol: null, iniciales_do: null, admin: false, habilitado: false, con_obras: false },
-    { user_id: "demo", email: "dtdoici@gmail.com", nombre_cuenta: "G.S.", registrado: dia(-10), nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true, habilitado: true, con_obras: true },
-    { user_id: "u-ana", email: "ana@ejemplo.com", nombre_cuenta: "Ana", registrado: dia(-6), nombre: "Ana", rol: "LECTOR", iniciales_do: null, admin: false, habilitado: true, con_obras: false },
+    { user_id: "u-juan", email: "juan.perez@antel.com.uy", nombre_cuenta: "Juan Pérez", registrado: dia(-1), nombre: null, rol: null, iniciales_do: null, admin: false, habilitado: false, con_obras: false },
+    { user_id: "demo", email: "gonza@antel.com.uy", nombre_cuenta: "G.S.", registrado: dia(-10), nombre: "Gonza", rol: "EDITOR", iniciales_do: "G.S.", admin: true, habilitado: true, con_obras: true },
+    { user_id: "u-otro", email: "alguien@gmail.com", nombre_cuenta: "Alguien", registrado: dia(-2), nombre: null, rol: null, iniciales_do: null, admin: false, habilitado: false, con_obras: false },
+    { user_id: "u-ana", email: "ana@antel.com.uy", nombre_cuenta: "Ana", registrado: dia(-6), nombre: "Ana", rol: "LECTOR", iniciales_do: null, admin: false, habilitado: true, con_obras: false },
   ];
   // ?demo=1&do=0 entra como usuario "con obras" que todavía no eligió su D.O.; &do=todas, como usuario que ve todas
   const modoDO = new URLSearchParams(location.search).get("do");
@@ -387,7 +401,9 @@ function crearDemo() {
     async nuevaContrasena() { await espera(); },
     async perfil() { await espera(); return structuredClone(yo); },
     async elegirMiDO(ini) { await espera(); yo.iniciales_do = ini; Object.assign(cuentas.find((c) => c.user_id === "demo"), { iniciales_do: ini }); },
-    async adminUsuarios() { await espera(); return structuredClone(cuentas); },
+    async adminUsuarios() { await espera(); return structuredClone(cuentas.filter((c) => c.habilitado || CORREO_ANTEL.test(c.email))); },
+    async pedirAcceso() { await espera(); return true; },
+    async adminAltaAutomatica(valor = null) { await espera(); if (valor != null) altaAutomatica = valor; return altaAutomatica; },
     async mediciones(eid) { await espera(); return structuredClone(mediciones.filter((m) => m.estructura_id === eid)).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha))); },
     async guardarMedicion(m) {
       await espera();
@@ -524,7 +540,7 @@ function crearDemo() {
       const campo = { ESTRUCTURA: "estructura", "LICITACIÓN": "licitacion", "AÑO": "anio", "D.O.": "director_obra",
         "FECHA INICIO": "fecha_inicio", "FECHA FIN": "fecha_fin", "RECEPCIÓN": "recepcion", PLANOS: "planos",
         OBSERVACIONES: "observaciones", "FIN PREVISTO": "fin_previsto", Sala: "sala", Localidad: "localidad", Departamento: "departamento",
-        "Licitación": "licitacion", Tarea: "tarea", "Descripción": "descripcion", Planos: "planos", ESTADO: "estado", Estado: "estado", OI: "oi", ART: "art", CANDADO: "candado", "FECHA FIN": "fecha_fin" };
+        "Licitación": "licitacion", Tarea: "tarea", "Descripción": "descripcion", Planos: "planos", ESTADO: "estado", Estado: "estado", OI: "oi", ART: "art", CANDADO: "candado" };
       const o = lista(t).find((x) => x.id === id);
       for (const [k, v] of Object.entries(cambios)) o[campo[k]] = v;
     },

@@ -12,7 +12,7 @@ ALTER TABLE public.usuarios_web ADD COLUMN IF NOT EXISTS admin boolean NOT NULL 
 -- Primer administrador: la cuenta de este correo
 UPDATE public.usuarios_web w SET admin = true
 FROM (SELECT to_jsonb(u) AS j FROM neon_auth."user" u) x
-WHERE w.user_id = x.j->>'id' AND lower(x.j->>'email') = lower('dtdoici@gmail.com');
+WHERE w.user_id = x.j->>'id' AND lower(x.j->>'email') = lower('correo.del.administrador@ejemplo.com')  -- (ya corrida: el correo real no se publica);
 
 CREATE OR REPLACE FUNCTION public.es_admin() RETURNS boolean
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$

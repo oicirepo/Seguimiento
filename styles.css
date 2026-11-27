@@ -680,3 +680,5 @@ body.con-medicion { overflow: hidden; }
   .app.con-ficha.plegado { grid-template-columns: var(--panel) 1fr; }
   .app.con-ficha:not(.plegado) #ficha { visibility: hidden; }
 }
+.tilde { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.4; cursor: pointer; }
+.tilde input { margin-top: 3px; width: auto; flex: none; }

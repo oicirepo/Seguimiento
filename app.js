@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE } from "./api.js?v=2026-11-26-21";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-22";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -642,6 +642,12 @@ function prepararIngreso() {
     ev.preventDefault();
     const f = ev.target, b = $("#boton-ingreso");
     $("#error-ingreso").hidden = true;
+    if (modo === "crear" && !CORREO_ANTEL.test(f.email.value.trim())) {
+      $("#error-ingreso").textContent = "Solo se pueden crear cuentas con un correo @antel.com.uy.";
+      $("#error-ingreso").hidden = false;
+      f.email.focus();
+      return;
+    }
     if (modo === "crear" && f.password.value !== f.password2.value) {
       $("#error-ingreso").textContent = "Las dos contraseñas no coinciden. Escribilas de nuevo.";
       $("#error-ingreso").hidden = false;
@@ -735,8 +741,12 @@ async function entrarApp() {
       return;
     }
   }
+  if (!S.perfil && S.usuario && CORREO_ANTEL.test(S.usuario.email || "")) {
+    try { if (await S.api.pedirAcceso()) S.perfil = await conTiempo(S.api.perfil(), 20000); } catch (e) { /* queda esperando habilitación */ }
+  }
   if (!S.perfil) {
     $("#correo-pendiente").textContent = S.usuario?.email || "";
+    $("#pendiente-no-antel").hidden = CORREO_ANTEL.test(S.usuario?.email || "");
     return mostrar("vista-pendiente");
   }
   // si entra otra persona en este dispositivo, no se mezclan los datos guardados
@@ -786,7 +796,6 @@ function mostrarApp() {
   $("#abrir-tabla").onclick = abrirTabla;
   prepararMapa();
   prepararPanel();
-  const v = leerJSON(CLAVE_VISTA);
   pintar();
   // al volver la señal, o al volver a la app después de un rato, se actualiza sola
   addEventListener("online", () => actualizar());
@@ -1352,9 +1361,9 @@ async function prepararPDF() {
 }
 const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const txt = (v) => (v == null || v === "" ? "—" : String(v));
+
 // En los informes, la carpeta de planos va como la palabra «abrir» con el enlace detrás
 const ENLACE = Symbol("enlace");
-const enlace = (url) => ({ [ENLACE]: String(url || "").trim() });
 
 // Símbolo de QGIS dibujado en el PDF (triángulo, círculo, cuadrado o asterisco con su color)
 function simboloPDF(doc, f, x, y, r, color, borde) {
@@ -2238,7 +2247,7 @@ function mostrarImportacion(tipo, nombre, cambios, problemas, sinId) {
 // ------------------------------------------------------------ ajustes (cuenta, mapa y datos guardados)
 function pintarAjustes() {
   pintarSolicitudes();
-  const rol = editor() ? "Editor" : "Solo lectura";
+  const rol = editor() ? "Editor" : "Solo visualizar";
   $("#cuenta-detalle").textContent = [S.usuario?.email, rol,
     conObras() ? (S.perfil.iniciales_do ? "Director de obra " + S.perfil.iniciales_do : "Director de obra (sin elegir)") : "Ve todas las obras"].filter(Boolean).join(" · ");
   $("#mi-do").hidden = !conObras();
@@ -2466,7 +2475,6 @@ function prepararMapa() {
 }
 
 function icono(tipo, o, cat) {
-  const c = CAT[cat];
   const activo = S.abierta && S.abierta.tipo === tipo && S.abierta.id === o.id;
   const grande = forma(tipo, o) === "asterisco";
   const px = grande ? 18 : 13;
@@ -2934,10 +2942,13 @@ async function abrirAdmin() {
       <input name="ini_otro" placeholder="Iniciales como figuran en D.O., ej. G.S." autocomplete="off" hidden></div>`;
   };
   const tipoTexto = (c) => (c.con_obras ?? !!c.iniciales_do) ? `con obras${c.iniciales_do ? " · " + esc(c.iniciales_do) : " · D.O. sin elegir"}` : "ve todas";
-  const rolSel = (r) => `<select name="rol"><option value="EDITOR" ${r === "EDITOR" ? "selected" : ""}>Editor</option><option value="LECTOR" ${r === "LECTOR" ? "selected" : ""}>Solo lectura</option></select>`;
+  const rolSel = (r) => `<select name="rol"><option value="EDITOR" ${r === "EDITOR" ? "selected" : ""}>Editor</option><option value="LECTOR" ${r === "LECTOR" ? "selected" : ""}>Solo visualizar</option></select>`;
   const reg = (c) => (c.registrado ? "se registró el " + fecha(String(c.registrado).slice(0, 10)) : "");
   caja.innerHTML = `<div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">Usuarios</h2>
-      <p class="nota">Quien se registra en la web aparece acá. Habilitalo para que vea las obras.</p></div>
+      <p class="nota">Quien se registra en la web con un correo @antel.com.uy aparece acá. Habilitalo para que vea las obras.</p></div>
+    <div class="ficha-bloque" id="bloque-alta" hidden>
+      <label class="tilde"><input type="checkbox" id="alta-automatica"><span>Las cuentas nuevas @antel.com.uy entran solas como <b>Solo visualizar</b> (ven todas las obras, sin D.O. y sin poder cambiar nada).</span></label>
+    </div>
     <div class="ficha-bloque">
       <h2>Esperando habilitación <span class="cuenta">${pend.length || ""}</span></h2>
       ${pend.length ? pend.map((c) => `<form class="form cuenta-form" data-id="${esc(c.user_id)}">
@@ -2946,7 +2957,8 @@ async function abrirAdmin() {
           <div class="dos"><label>Permiso${rolSel("EDITOR")}</label>
           <label>Tipo de usuario${tipoSel(false)}</label></div>
           ${doSel("", false)}
-          <button class="boton boton-primario" type="submit">Habilitar</button>
+          <div class="acciones"><button class="boton boton-primario" type="submit">Habilitar</button>
+          <button class="boton" type="button" data-solo-ver>Habilitar solo para ver</button></div>
         </form>`).join("") : `<p class="nota">No hay cuentas nuevas. Cuando alguien use "Crear cuenta" en la web, va a aparecer acá.</p>`}
     </div>
     <div class="ficha-bloque">
@@ -2962,6 +2974,22 @@ async function abrirAdmin() {
         </form>`).join("")}
     </div>`;
   enlazarCerrar(caja, () => { caja.hidden = true; });
+  S.api.adminAltaAutomatica().then((v) => {
+    const b = $("#bloque-alta"), t = $("#alta-automatica");
+    if (!b) return;
+    b.hidden = false; t.checked = v;
+    t.onchange = async () => {
+      t.disabled = true;
+      try { t.checked = await S.api.adminAltaAutomatica(t.checked); aviso(t.checked ? "Alta automática prendida" : "Alta automática apagada"); }
+      catch (e) { t.checked = !t.checked; aviso(e.message, true); }
+      finally { t.disabled = false; }
+    };
+  }).catch(() => {});
+  caja.querySelectorAll("[data-solo-ver]").forEach((b) => (b.onclick = () => {
+    const f = b.closest("form");
+    f.rol.value = "LECTOR"; f.tipo.value = "todas"; f.tipo.onchange();
+    f.requestSubmit();
+  }));
   caja.querySelectorAll(".cuenta-form").forEach((f) => {
     const campoDO = f.querySelector(".campo-do");
     f.tipo.onchange = () => (campoDO.hidden = f.tipo.value !== "obras");
@@ -4858,7 +4886,6 @@ function listaCodigosAgri() {
 
 function pintarDibujo() {
   const caja = $("#nuevo"), tri = DIB.destino === "triangulo", ed = DIB.editar;
-  const admin = !!S.perfil?.admin;
   caja.innerHTML = `
     <div class="ficha-cabeza">${barraCerrar("Volver al mapa")}<h2 class="admin-titulo">${ed ? `Editar ${esc(ed.nombre)}` : "Polígono nuevo"}</h2>
       <p class="nota" style="margin:0">${ed
@@ -6348,9 +6375,6 @@ function ponerCelda(hoja, ref, v) {
   const dentro = sig ? rm[1].replace(new RegExp(`<c r="${sig[1]}${fila}"`), `${cel}<c r="${sig[1]}${fila}"`) : rm[1] + cel;
   return hoja.replace(rm[0], rm[0].replace(rm[1], dentro));
 }
-// las fórmulas que quedaron con un error guardado (#DIV/0!) se dejan sin resultado hasta que recalcule
-const sinErroresViejos = (h) => h.replace(/<c r="([A-Z]+\d+)"((?:\s+[a-z:]+="[^"]*")*)>(<f\b[^>]*\/>|<f\b[^>]*>[\s\S]*?<\/f>)<v>[^<]*<\/v><\/c>/g,
-  (todo, ref, at, f) => (/\st="e"/.test(at) ? `<c r="${ref}"${at.replace(/\s+t="[^"]*"/, "")}>${f}</c>` : todo));
 async function abrirPlantilla(archivo) {
   const XLSX = await prepararExcel();
   const resp = await fetch(archivo);
