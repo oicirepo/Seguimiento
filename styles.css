@@ -604,6 +604,8 @@ body.con-medicion { overflow: hidden; }
 .med-costado line { stroke: #777; stroke-width: 1; }
 .med-costado g.actual line { stroke: var(--acento); stroke-width: 3; }
 .med-costado g.actual text { fill: var(--acento); font-size: 12px; }
+.med-costado g.rienda line { stroke: #5a5a5a; stroke-width: .8; }
+.med-costado g.rienda.actual line { stroke: var(--acento); stroke-width: 2; }
 .med-ayuda { margin: 4px 0 12px; }
 .med-tramos { display: grid; gap: 10px; }
 .med-tramo { padding: 10px 12px; border: 1px solid var(--linea-suave); border-radius: 10px; background: var(--superficie); }
@@ -664,9 +666,22 @@ body.con-medicion { overflow: hidden; }
 .menu-ctx button.peligro { color: #FFB4A9; }
 .menu-ctx button:hover, .menu-ctx button:focus-visible { background: #3a3a3a; outline: none; }
 .med-lista button[data-abrir] { -webkit-touch-callout: none; user-select: none; }
-.med-nivel h3 { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.med-nivel h3 { display: grid; grid-template-columns: 1fr auto 1fr; align-items: baseline; gap: 6px; }
+.med-donde { font: 400 13px var(--texto); color: var(--tinta-suave); white-space: nowrap; }
+.med-nombre { text-align: center; font: 700 17px/1.2 var(--cond); color: var(--acento); }
+.med-nivel .med-valor { justify-self: end; margin-left: 0; }
+/* mástil: el dibujo queda fijo arriba mientras se cargan los niveles */
+.med-cuerpo .med-esquema:has(.med-dibujo) { position: sticky; top: -14px; z-index: 3; background: var(--fondo); padding: 14px 0 8px; margin: -14px 0 6px; border-bottom: 1px solid var(--linea-suave); align-items: center; }
+.med-esquema:has(.med-dibujo) .med-dibujo { width: auto; height: 118px; max-width: 58%; object-fit: contain; }
+.med-esquema:has(.med-dibujo) .med-costado { height: 150px; }
+.med-tramos > * , .med-nivel { min-width: 0; }
+.cuartos { min-width: 0; width: 100%; }
+.med-nivel { scroll-margin-top: 185px; }
 .med-valor { margin-left: auto; font: 700 15px var(--cond); color: var(--acento); }
-.cuartos { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; }
+.cuartos { display: flex; gap: 4px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; }
+.cuartos::-webkit-scrollbar { display: none; }
+.cuartos button { flex: 0 0 calc((100% - 32px) / 9); scroll-snap-align: start; }
+.cuartos button.extra { background: #3a2a2a; border-style: dashed; font-size: 14px; }
 .cuartos button { min-width: 0; padding: 12px 0; border: 1px solid var(--linea); border-radius: 8px; background: var(--campo); color: var(--tinta); font: 700 16px/1 var(--cond); cursor: pointer; }
 .cuartos button.cero { background: #2c2c2c; }
 .cuartos button.mas { color: #9BE1EA; } .cuartos button.menos { color: #F2C14E; }

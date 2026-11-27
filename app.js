@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-23";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-24";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5864,16 +5864,36 @@ function pieHtml(m, r) {
 }
 
 // ---- monopolo: esquema y lecturas en ° ′ ″
-function esquemaCostado(niveles, actual, nombre) {
+function esquemaCostado(niveles, actual, nombre, mastil = false) {
   const n = niveles.length, alto = 200, base = 186, arriba = 18;
   const H = Math.max(...niveles.map((x) => x.h ?? 0), 1);
   const ys = niveles.map((x, i) => (x.h != null ? base - ((base - arriba) * x.h) / H : base - ((base - arriba) * i) / Math.max(1, n - 1)));
+  // etiquetas que se pisarían: se oculta la de abajo, y siempre se deja ver la del nivel actual
+  const oculto = (i, y) => (i !== actual && ((i < n - 1 && i + 1 !== actual && Math.abs(ys[i + 1] - y) < 11) || (actual != null && Math.abs(ys[actual] - y) < 11)) ? 'opacity="0"' : "");
+  if (mastil) {
+    // mástil recto (como el alzado del plano), con las riendas y los antirrotores hacia el anclaje
+    const cx = 52, w = 4, ax = 114, ay = base + 4;
+    const tipo = (i) => (/antirr/i.test(niveles[i].nombre || "") ? "anti" : /rienda|cintur/i.test(niveles[i].nombre || "") ? "rienda" : "");
+    const zig = [];
+    for (let y = base, k = 0; y > arriba + 3; y -= 6, k++) zig.push(`${cx + (k % 2 ? w : -w)},${y}`);
+    return `<svg viewBox="0 0 120 ${alto}" class="med-costado" aria-label="El mástil de costado: ${esc(nombre)}">
+    <line x1="4" y1="${ay}" x2="118" y2="${ay}" stroke="#666" stroke-width="2"/>
+    <rect x="${cx - w}" y="${arriba}" width="${2 * w}" height="${base - arriba}" fill="#333" stroke="#999" stroke-width="1"/>
+    <polyline points="${zig.join(" ")}" fill="none" stroke="#777" stroke-width=".7"/>
+    ${ys.map((y, i) => { const t = tipo(i); if (!t) return "";
+      const x0 = t === "anti" ? cx + w + 7 : cx + w;
+      return `<g data-i="${i}" class="rienda${i === actual ? " actual" : ""}">${t === "anti" ? `<line x1="${cx - w - 7}" y1="${y}" x2="${cx + w + 7}" y2="${y}"/>` : ""}<line x1="${x0}" y1="${y}" x2="${ax}" y2="${ay}"/></g>`; }).join("")}
+    <rect x="${ax - 3}" y="${ay - 3}" width="6" height="6" fill="none" stroke="#999"/>
+    ${ys.map((y, i) => `<g data-i="${i}" class="${i === actual ? "actual" : ""}"><line x1="${cx - w - 4}" y1="${y}" x2="${cx + w + 4}" y2="${y}"/>
+      <text x="${cx - w - 6}" y="${y + 3.5}" text-anchor="end" ${oculto(i, y)}>${esc(niveles[i].etq)}</text></g>`).join("")}
+  </svg>`;
+  }
   const ancho = (i) => 6 + 9 * (1 - i / Math.max(1, n - 1));
   return `<svg viewBox="0 0 120 ${alto}" class="med-costado" aria-label="La estructura de costado: ${esc(nombre)}">
     <line x1="10" y1="${base + 4}" x2="110" y2="${base + 4}" stroke="#666" stroke-width="2"/>
     <path d="M${60 - ancho(0)} ${base} L${60 - ancho(n - 1)} ${arriba} L${60 + ancho(n - 1)} ${arriba} L${60 + ancho(0)} ${base}Z" fill="#3a3a3a" stroke="#888" stroke-width="1"/>
-    ${ys.map((y, i) => `<g class="${i === actual ? "actual" : ""}"><line x1="${60 - ancho(i) - 6}" y1="${y}" x2="${60 + ancho(i) + 6}" y2="${y}"/>
-      <text x="${60 + ancho(i) + 10}" y="${y + 4}" ${i !== actual && i < n - 1 && Math.abs(ys[i + 1] - y) < 11 ? 'opacity="0"' : ""}>${esc(niveles[i].etq)}</text></g>`).join("")}
+    ${ys.map((y, i) => `<g data-i="${i}" class="${i === actual ? "actual" : ""}"><line x1="${60 - ancho(i) - 6}" y1="${y}" x2="${60 + ancho(i) + 6}" y2="${y}"/>
+      <text x="${60 + ancho(i) + 10}" y="${y + 4}" ${oculto(i, y)}>${esc(niveles[i].etq)}</text></g>`).join("")}
   </svg>`;
 }
 function esquemaHtml(lado, d, tramo) {
@@ -5916,10 +5936,20 @@ const campoNum = (attr, v, puede, etq, conSigno = true) => `<label class="med-nu
   <input inputmode="decimal" autocomplete="off" ${attr} value="${esc(v ?? "")}" ${puede ? "" : "disabled"} aria-label="${etq}"></span></label>`;
 // Se mide desde un lado a la vez (el teodolito en el anclaje 1, después el 2 y el 3): cada pestaña es un lado,
 // con todos los niveles. En medios parantes se elige con un toque, de −1 a +1 de a cuartos (+ = se corrió a la derecha).
-const CUARTOS = [[-1, "−1"], [-0.75, "−¾"], [-0.5, "−½"], [-0.25, "−¼"], [0, "0"], [0.25, "+¼"], [0.5, "+½"], [0.75, "+¾"], [1, "+1"]];
+const CUARTOS = [[-2, "−2"], [-1.75, "−1¾"], [-1.5, "−1½"], [-1.25, "−1¼"], [-1, "−1"], [-0.75, "−¾"], [-0.5, "−½"], [-0.25, "−¼"], [0, "0"],
+  [0.25, "+¼"], [0.5, "+½"], [0.75, "+¾"], [1, "+1"], [1.25, "+1¼"], [1.5, "+1½"], [1.75, "+1¾"], [2, "+2"]];
+// la fila muestra de −1 a +1; deslizando a los costados aparecen los valores mayores (muy torcido)
+function ubicarCuartos(p) {
+  p.querySelectorAll(".cuartos").forEach((fila) => {
+    const b = [...fila.children], paso = b[1].offsetLeft - b[0].offsetLeft;
+    const sel = b.findIndex((x) => x.getAttribute("aria-pressed") === "true");
+    const inicio = sel < 0 || (sel >= 4 && sel <= 12) ? 4 : sel < 4 ? sel : sel - 8;
+    fila.scrollLeft = inicio * paso;
+  });
+}
 function nivelesHtml(k, d, r, puede) {
   const t = MD.tramo;
-  const costado = esquemaCostado(d.niveles.map((n) => ({ h: numeroCampo(n.altura), etq: `${numero(numeroCampo(n.altura), 1)} m` })), t, `nivel a ${d.niveles[t]?.altura} m`);
+  const costado = esquemaCostado(d.niveles.map((n) => ({ h: numeroCampo(n.altura), etq: `${numero(numeroCampo(n.altura), 1)} m`, nombre: n.nombre })), t, `nivel a ${d.niveles[t]?.altura} m`, true);
   const hechos = d.niveles.filter((n) => numeroCampo(n.D[k]) != null).length;
   return `<div class="med-esquema"><img src="plantillas/mastil-esquema.png" alt="Planta del mástil: lados 1, 2 y 3, D1, D2 y D3 positivos en el sentido de las flechas" class="med-dibujo">${costado}</div>
     ${numeroCampo(d.medio_parante) ? `<p class="nota med-unidad">Lecturas en medios parantes (1 = ${numero(numeroCampo(d.medio_parante), 1)} cm).</p>` : ""}
@@ -5928,9 +5958,9 @@ function nivelesHtml(k, d, r, puede) {
     <div class="med-tramos">${d.niveles.map((n, i) => {
       const v = numeroCampo(n.D[k]);
       return `<section class="med-tramo med-nivel${i === t ? " actual" : ""}" data-tramo="${i}">
-        <h3>Nivel ${i + 1}${n.nombre ? ` <span class="med-chip">${esc(n.nombre)}</span>` : ""} <small>a ${numero(numeroCampo(n.altura), 1)} m</small>${v != null ? `<span class="med-valor">D${k + 1} = ${CUARTOS.find((c) => c[0] === v)?.[1] ?? numero(v, 2)}</span>` : ""}</h3>
+        <h3><span class="med-donde">Nivel ${i + 1} · ${numero(numeroCampo(n.altura), 1)} m</span><span class="med-nombre">${esc(n.nombre || "")}</span><span class="med-valor">${v != null ? `D${k + 1} = ${CUARTOS.find((c) => c[0] === v)?.[1] ?? numero(v, 2)}` : ""}</span></h3>
         <div class="cuartos" role="group" aria-label="D${k + 1} del nivel ${i + 1}">${CUARTOS.map(([c, txt]) =>
-            `<button type="button" data-q="${i}:${k}:${c}" aria-pressed="${v === c}" ${puede ? "" : "disabled"} class="${c === 0 ? "cero" : c > 0 ? "mas" : "menos"}">${txt}</button>`).join("")}</div>
+            `<button type="button" data-q="${i}:${k}:${c}" aria-pressed="${v === c}" ${puede ? "" : "disabled"} class="${c === 0 ? "cero" : c > 0 ? "mas" : "menos"}${Math.abs(c) > 1 ? " extra" : ""}">${txt}</button>`).join("")}</div>
         <p class="med-desp" data-desp="${i}">${resNivel(r.filas[i])}</p>
       </section>`;
     }).join("")}</div>
@@ -6091,7 +6121,7 @@ function enlazarMedicion(p, m) {
     if (MD.tramo === i) return;
     MD.tramo = i;
     p.querySelectorAll(".med-tramo").forEach((s) => s.classList.toggle("actual", Number(s.dataset.tramo) === i));
-    p.querySelectorAll(".med-costado g").forEach((g, k) => g.classList.toggle("actual", k === i));
+    p.querySelectorAll(".med-costado g[data-i]").forEach((g) => g.classList.toggle("actual", Number(g.dataset.i) === i));
   };
   const entradas = [...p.querySelectorAll("[data-gms], [data-d], [data-l]")];
   entradas.forEach((inp, idx) => {
@@ -6139,6 +6169,7 @@ function enlazarMedicion(p, m) {
     const c = document.querySelector("#med-cuerpo"); c.scrollTop = y;
     c.querySelector(`.med-tramo[data-tramo="${MD.tramo}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }));
+  if (p.querySelector(".cuartos")) ubicarCuartos(p);
   p.querySelectorAll("[data-dato]").forEach((inp) => (inp.oninput = () => { d[inp.dataset.dato] = inp.value; cambio(); }));
   p.querySelector("[data-fecha]")?.addEventListener("input", (e) => { m.fecha = e.target.value; cambio(); });
   p.querySelector("[data-a-todos]")?.addEventListener("input", (e) => { d.niveles.forEach((n) => (n.A = e.target.value)); cambio(); });
