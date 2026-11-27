@@ -3,13 +3,13 @@
 //   La página principal se pide a la red primero, pero si tarda más de 4 s se usa la guardada.
 // - Mapas de fondo: cada pedazo de mapa que se ve queda guardado (hasta unos 3000).
 // - Los datos de Neon no pasan por acá: los guarda la propia web en el dispositivo.
-const V = "2026-11-26-26";
+const V = "2026-11-26-27";
 const CACHE = "obras-oici-" + V;
 const MAPAS = "obras-oici-mapas-v1";
 const MAX_TESELAS = 3000;
 const BASICOS = ["./", `styles.css?v=${V}`, `app.js?v=${V}`, `api.js?v=${V}`, "config.js", "vendor/neon.js",
   "vendor/leaflet/leaflet.js", "vendor/leaflet/leaflet.css", "datos/departamentos.geojson", "manifest.webmanifest",
-  "iconos/icono-192.png", "plantillas/verticalidad-monopolo.xlsx", "plantillas/mastil-riendas.xlsx", "plantillas/mastil-verticalidad.xlsx", "plantillas/mastil-esquema.png", "vendor/xlsx/xlsx-estilos.min.js"];
+  "iconos/icono-192.png", "plantillas/verticalidad-monopolo.xlsx", "plantillas/mastil-riendas.xlsx", "plantillas/mastil-verticalidad.xlsx", "vendor/xlsx/xlsx-estilos.min.js"];
 const ES_MAPA = /(^|\.)tile\.openstreetmap\.org$|(^|\.)arcgisonline\.com$/;
 
 self.addEventListener("install", (ev) => {

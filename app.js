@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-26";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-26-27";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5790,7 +5790,7 @@ async function abrirMediciones(o, tipo) {
 
 function pestanasDe(m) {
   if (m.tipo === "verticalidad_monopolo") return [["lado1", "Lado 1"], ["lado2", "Lado 2"], ["resultado", "Resultado"], ["datos", "Datos"]];
-  if (m.tipo === "verticalidad_mastil") return [["lado0", "Anclaje 1"], ["lado1", "Anclaje 2"], ["lado2", "Anclaje 3"], ["resultado", "Resultado"], ["datos", "Datos"]];
+  if (m.tipo === "verticalidad_mastil") return [...ANCLAJES_V.map((a, k) => [`lado${k}`, `Anclaje ${a}`]), ["resultado", "Resultado"], ["datos", "Datos"]];
   return [...m.datos.anclajes.map((a, i) => [`anclaje${i}`, `Anclaje ${a.nombre}`]), ["resultado", "Resultado"], ["datos", "Datos"]];
 }
 function editarMedicion(m) {
@@ -5958,14 +5958,34 @@ function ubicarCuartos(p) {
     fila.scrollLeft = inicio * paso;
   });
 }
+// Mástil de planta: la sección triangular al medio y los tres anclajes (A da D1, B da D2, C da D3).
+// El anclaje donde está el teodolito va resaltado, con la visual al mástil y hacia dónde es + (a la derecha de quien mira).
+const ANCLAJES_V = ["A", "B", "C"];
+function plantaMastil(k) {
+  const c = 60, R = 47, ang = [90, 210, 330].map((g) => (g * Math.PI) / 180);
+  const pt = (a, r) => [c + r * Math.cos(a), c + r * Math.sin(a)];
+  const tri = ang.map((a) => pt(a + Math.PI, 9).map((v) => v.toFixed(1)).join(",")).join(" ");
+  const [ax, ay] = pt(ang[k], R), vx = c - ax, vy = c - ay, L = Math.hypot(vx, vy), rx = -vy / L, ry = vx / L;
+  const f0 = [c - rx * 13 + (ax - c) * 0.33, c - ry * 13 + (ay - c) * 0.33], f1 = [c + rx * 13 + (ax - c) * 0.33, c + ry * 13 + (ay - c) * 0.33];
+  return `<svg viewBox="0 0 120 120" class="med-planta" aria-label="El mástil visto de arriba: teodolito en el anclaje ${ANCLAJES_V[k]}">
+    <defs><marker id="flecha-mas" viewBox="0 0 6 6" refX="5" refY="3" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L6 3L0 6z" fill="#9BE1EA"/></marker></defs>
+    ${ang.map((a, i) => { const [x, y] = pt(a, R); return `<line x1="${c}" y1="${c}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="${i === k ? "var(--acento)" : "#555"}" stroke-width="${i === k ? 1.5 : 0.8}" ${i === k ? 'stroke-dasharray="4 3"' : ""}/>`; }).join("")}
+    <polygon points="${tri}" fill="#3a3a3a" stroke="#aaa" stroke-width="1.5"/>
+    <line x1="${f0[0].toFixed(1)}" y1="${f0[1].toFixed(1)}" x2="${f1[0].toFixed(1)}" y2="${f1[1].toFixed(1)}" stroke="#9BE1EA" stroke-width="1.3" marker-end="url(#flecha-mas)"/>
+    <text x="${(f1[0] + rx * 6).toFixed(1)}" y="${(f1[1] + ry * 6 + 3).toFixed(1)}" text-anchor="middle" class="mas">+</text>
+    ${ang.map((a, i) => { const [x, y] = pt(a, R); return i === k
+      ? `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)})"><circle r="9" fill="var(--acento-fuerte)" stroke="var(--acento)"/><text y="4" text-anchor="middle" class="t">${ANCLAJES_V[i]}</text></g>`
+      : `<g transform="translate(${x.toFixed(1)} ${y.toFixed(1)})" opacity=".5"><circle r="7" fill="none" stroke="#888" stroke-dasharray="2 2"/><text y="3.5" text-anchor="middle" class="t2">${ANCLAJES_V[i]}</text></g>`; }).join("")}
+  </svg>`;
+}
 function nivelesHtml(k, d, r, puede) {
   const t = MD.tramo;
   const costado = esquemaCostado(d.niveles.map((n) => ({ h: numeroCampo(n.altura), etq: `${numero(numeroCampo(n.altura), 1)} m`, nombre: n.nombre })), t, `nivel a ${d.niveles[t]?.altura} m`, true);
   const hechos = d.niveles.filter((n) => numeroCampo(n.D[k]) != null).length;
-  return `<div class="med-esquema fijo"><img src="plantillas/mastil-esquema.png" alt="Planta del mástil: lados 1, 2 y 3, D1, D2 y D3 positivos en el sentido de las flechas" class="med-dibujo">${costado}</div>
+  return `<div class="med-esquema fijo">${plantaMastil(k)}${costado}</div>
     ${numeroCampo(d.medio_parante) ? `<p class="nota med-unidad">Lecturas en medios parantes (1 = ${numero(numeroCampo(d.medio_parante), 1)} cm).</p>` : ""}
     ${!numeroCampo(d.medio_parante) ? `<p class="nota med-alerta">Falta la medida del medio parante (en Datos) para pasar las lecturas a cm y calcular.</p>` : ""}
-    <p class="nota med-ayuda">Teodolito en el <b>anclaje ${k + 1}</b> (lado ${k + 1} del dibujo, da D${k + 1}): para cada nivel, mirá el medio del parante y marcá cuánto se corrió: <b>+ a la derecha</b>, − a la izquierda. Van ${hechos} de ${d.niveles.length}.</p>
+    <p class="nota med-ayuda">Teodolito en el <b>anclaje ${ANCLAJES_V[k]}</b> (da D${k + 1}): para cada nivel, mirá el medio del parante y marcá cuánto se corrió: <b>+ a la derecha</b>, − a la izquierda. Van ${hechos} de ${d.niveles.length}.</p>
     <div class="med-tramos">${d.niveles.map((n, i) => {
       const v = numeroCampo(n.D[k]);
       return `<section class="med-tramo med-nivel${i === t ? " actual" : ""}" data-tramo="${i}">
@@ -5975,7 +5995,7 @@ function nivelesHtml(k, d, r, puede) {
         <p class="med-desp" data-desp="${i}">${resNivel(r.filas[i])}</p>
       </section>`;
     }).join("")}</div>
-    ${k < 2 ? `<button type="button" class="boton med-seguir" data-pest="lado${k + 1}">Seguir con el anclaje ${k + 2} ›</button>` : `<button type="button" class="boton med-seguir" data-pest="resultado">Ver el resultado ›</button>`}`;
+    ${k < 2 ? `<button type="button" class="boton med-seguir" data-pest="lado${k + 1}">Seguir con el anclaje ${ANCLAJES_V[k + 1]} ›</button>` : `<button type="button" class="boton med-seguir" data-pest="resultado">Ver el resultado ›</button>`}`;
 }
 const resNivel = (f) => (f.falta ? "Desplome: — (faltan lados)" : `d ${numero(f.d, 1)} cm · giro <b>${f.a != null ? numero(f.a, 2) + "°" : "—"}</b> · x ${numero(f.x, 1)} · y ${numero(f.y, 1)} · desplome <b>${numero(f.r, 1)} cm</b>`);
 function resultadoMastilHtml(r) {

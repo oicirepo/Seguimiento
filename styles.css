@@ -601,6 +601,7 @@ body.con-medicion { overflow: hidden; }
 .med-esquema text { fill: var(--tinta-suave); font: 600 10px var(--texto); }
 .med-esquema text.t { fill: #fff; font-size: 10px; }
 .med-esquema text.t2 { font-size: 8px; }
+.med-esquema text.mas { fill: #9BE1EA; font-size: 10px; }
 .med-costado line { stroke: #777; stroke-width: 1; }
 .med-costado g.actual line { stroke: var(--acento); stroke-width: 3; }
 .med-costado g.actual text { fill: var(--acento); font-size: 12px; }
@@ -641,7 +642,6 @@ body.con-medicion { overflow: hidden; }
 .med-leyenda span::before { content: ""; display: inline-block; width: 14px; height: 3px; margin-right: 5px; vertical-align: middle; background: var(--c, #C0392B); }
 .med-leyenda .tol::before { background: none; border-top: 2px dashed #C0392B; }
 @media (max-width: 760px) { .med-barra h2 { font-size: 16px; } .gms input { font-size: 19px; padding: 11px 4px; } }
-.med-dibujo { width: 210px; max-width: 58%; height: auto; padding: 4px; border-radius: 8px; background: #fff; align-self: center; }
 .med-tres { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .med-num { display: grid; gap: 4px; font-size: 12px; color: var(--tinta-suave); }
 .med-num-caja { display: flex; align-items: stretch; }
@@ -672,8 +672,7 @@ body.con-medicion { overflow: hidden; }
 .med-nivel .med-valor { justify-self: end; margin-left: 0; }
 /* mástil: el dibujo queda fijo arriba mientras se cargan los niveles */
 .med-cuerpo .med-esquema.fijo { position: sticky; top: -14px; z-index: 3; background: var(--fondo); padding: 14px 0 8px; margin: -14px 0 6px; border-bottom: 1px solid var(--linea-suave); align-items: center; }
-.med-esquema:has(.med-dibujo) .med-dibujo { width: auto; height: 118px; max-width: 58%; object-fit: contain; }
-.med-esquema:has(.med-dibujo) .med-costado { height: 150px; }
+
 .med-tramos > * , .med-nivel { min-width: 0; }
 .cuartos { min-width: 0; width: 100%; }
 .med-tramo { scroll-margin-top: 185px; }
