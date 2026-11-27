@@ -1,4 +1,4 @@
-import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-27-1";
+import { crearApi, PERFILES_BASE, CORREO_ANTEL } from "./api.js?v=2026-11-27-2";
 
 // ------------------------------------------------------------ categorías
 // Mismos colores que la simbología de QGIS.
@@ -5607,6 +5607,7 @@ function calcularVerticalidad(d) {
 // desplome entre dos puntos ≤ 0,25 % de su separación vertical; y el desplome máximo admisible si se cargó.
 // lecturas siempre en «medios parantes», de a cuartos (columna «completar en sitio» de la planilla)
 const factorMastil = (d) => numeroCampo(d.medio_parante) || null;
+const SEPARACION_MIN_M = 3;
 function calcularMastil(d) {
   const fac = factorMastil(d);
   const filas = d.niveles.map((n) => {
@@ -5625,7 +5626,9 @@ function calcularMastil(d) {
   let giro = null, desp = null;
   for (let i = 0; i < ok.length; i++) for (let j = i + 1; j < ok.length; j++) {
     const a = ok[i], b = ok[j], dh = Math.abs(b.h - a.h);
-    if (!dh) continue;
+    // en la app solo se comparan niveles separados 3 m o más («cualquier par de puntos que disten 3 m»): más cerca,
+    // un cuarto de parante ya supera la tolerancia. El Excel exportado sigue comparando todos los pares, como la planilla.
+    if (dh < SEPARACION_MIN_M) continue;
     if (a.a != null && b.a != null) {
       const lim = (0.5 * dh) / 3, v = Math.abs(b.a - a.a);
       if (!giro || v / lim > giro.v / giro.lim) giro = { v, lim, de: a.h, a: b.h };
@@ -6053,8 +6056,8 @@ function resultadoMastilHtml(r) {
     </tbody></table>
     <ul class="med-checks">
       <li>Giro total máx.: <b>${r.aMax?.a != null ? numero(r.aMax.a, 2) + "°" : "—"}</b> (tolerancia 5°)</li>
-      <li>Giro entre niveles: <b>${r.giro ? `${numero(r.giro.v, 2)}° entre ${numero(r.giro.de, 1)} y ${numero(r.giro.a, 1)} m` : "—"}</b> (0,5° cada 3 m${r.giro ? `: máx. ${numero(r.giro.lim, 2)}°` : ""})</li>
-      <li>Desplome entre niveles: <b>${r.desp ? `${numero(r.desp.v * 100, 2)} % entre ${numero(r.desp.de, 1)} y ${numero(r.desp.a, 1)} m` : "—"}</b> (tolerancia 0,25 %)</li>
+      <li>Giro entre niveles: <b>${r.giro ? `${numero(r.giro.v, 2)}° entre ${numero(r.giro.de, 1)} y ${numero(r.giro.a, 1)} m` : "—"}</b> (0,5° cada 3 m${r.giro ? `: máx. ${numero(r.giro.lim, 2)}°` : ""}; niveles a 3 m o más)</li>
+      <li>Desplome entre niveles: <b>${r.desp ? `${numero(r.desp.v * 100, 2)} % entre ${numero(r.desp.de, 1)} y ${numero(r.desp.a, 1)} m` : "—"}</b> (tolerancia 0,25 %; niveles a 3 m o más)</li>
       ${r.adm != null ? `<li>Desplome máx.: <b>${fmtCm(r.rMax)}</b> (admisible ${fmtCm(r.adm)})</li>` : ""}
     </ul>
     <p class="nota">Cálculo igual que la planilla: d = (D1+D2+D3)/3, e = d·√3/A, α = arcsen(e), x = (D2−D3)/√3, y = (2·D1−D2−D3)/3, r = √(x²+y²).</p>`;
